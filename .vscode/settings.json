@@ -1,3 +1,8 @@
 {
-  "python.formatting.provider": "black"
+  "python.formatting.provider": "black",
+  "python.analysis.typeCheckingMode": "off",
+  "python.formatting.blackArgs": [
+    "--line-length",
+    "100"
+  ]
 }

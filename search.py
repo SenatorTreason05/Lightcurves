@@ -1,0 +1,413 @@
+"""Mihir Patankar [mpatankar06@gmail.com]"""
+import atexit
+import os
+import re
+import shutil
+import sys
+import threading
+import time
+from contextlib import suppress
+from datetime import datetime
+from glob import glob
+from itertools import zip_longest
+from os import path
+from queue import Empty, Queue
+from threading import Event, Thread
+
+import psutil
+from astropy import units
+from astropy.coordinates import SkyCoord
+from astropy.coordinates.name_resolve import NameResolveError
+
+# pylint: disable-next=no-name-in-module
+from ciao_contrib.runtool import search_csc
+from pyvo import DALFormatError, dal
+from tqdm import tqdm
+
+from lightcurve import LightcurveGenerator
+
+
+class SourceManager:
+    """Handles searching, downloading, and processing of sources. Also manages threading for doing
+    tasks in parallel and logging."""
+
+    def __init__(self, config):
+        self.config = config
+        self.sources = []
+        self.downloaded_source_queue = None
+        self.download_message_queue, self.process_message_queue = Queue(), Queue()
+        self.sources_downloaded, self.sources_processed = 0, 0
+
+    def search_csc(self):
+        """Queries the Chandra Source Catalog for sources matching the search criteria."""
+        search_radius = self.config["Search Radius (arcmin)"] * units.arcmin
+        object_name = self.config["Object Name"]
+        significance_threshold = self.config["Significance Threshold"]
+        try:
+            sky_coord = SkyCoord.from_name(object_name)
+            cone_search = dal.SCSService("http://cda.cfa.harvard.edu/csc2scs/coneSearch")
+            print("Searching CSC sources...")
+            start_time = time.time()
+            search_results = cone_search.search(sky_coord, search_radius, verbosity=2)
+        except NameResolveError:
+            print(f'No results for object "{object_name}".')
+            sys.exit(1)
+        except DALFormatError:
+            print("Failed to connect to search service, check internet connection?")
+            sys.exit(1)
+        print(f"Found {len(search_results)} sources in {(time.time() - start_time):.3f}s.")
+        significant_results = [
+            result for result in search_results if result["significance"] >= significance_threshold
+        ]
+        significant_results_count = len(significant_results)
+        print(f"Found {significant_results_count} sources meeting the significance threshold.")
+        if significant_results_count == 0:
+            sys.exit(0)
+        self.downloaded_source_queue = Queue(significant_results_count)
+        self.sources = significant_results
+
+    @staticmethod
+    def download_data_products(download_directory, right_ascension, declination):
+        """Uses a ciao tool to download certain data products from csc2 for a given source using
+        the obtained celestial sphere coords for a source name. Currently we only need the event
+        file and the source region map."""
+        search_csc(
+            pos=f"{right_ascension}, {declination}",
+            radius="1.0",
+            outfile="search-csc-outfile.tsv",
+            radunit="arcsec",
+            columns="",
+            sensitivity="no",
+            download="all",
+            root=download_directory,
+            bands="broad, wide",
+            filetypes="regevt, reg",
+            catalog="csc2",
+            verbose="0",
+            clobber="1",
+        )
+
+    def print_data_product_progress(self, source_directory, finished_downloading_source):
+        """Checks and reports how many files have been downloaded."""
+        complete = False
+        last_progress_message = ""
+        download_start_time = time.time()
+        while True:
+            source_directory_exists = path.isdir(source_directory)
+            observation_count = len(os.listdir(source_directory)) if source_directory_exists else 0
+            data_products_count = len(glob(path.join(source_directory, "**/*.gz"), recursive=True))
+            message = (
+                f"\rRetrieved {observation_count} observations, "
+                f"{data_products_count} data products. "
+                f"({(time.time() - download_start_time):.2f}s)"
+            )
+            if message != last_progress_message:
+                self.download_message_queue.put(message)
+            last_progress_message = message
+            if finished_downloading_source.is_set() and not complete:
+                complete = True  # This flag allows the loop to run a final time before finishing.
+                continue
+            if complete:
+                break
+            time.sleep(0.1)
+
+    def download_all_data_products(self):
+        """Goes through all CSC results, finds their coordinates and requests their data products.
+        Spins up another thread as a child to this one to handle counting and reporting the number
+        of data products downloaded in the file system."""
+        data_directory = self.config["Data Directory"]
+        shutil.rmtree(data_directory, ignore_errors=True)
+        source_count = 0
+        for source_count, source in enumerate(self.sources, 1):
+            finished_downloading_source = Event()
+            source_directory = path.join(data_directory, source["name"].replace(" ", ""))
+            progress = f"{(source_count)}/{len(self.sources)}"
+            self.download_message_queue.put(f"Downloading source {source['name']}... {progress}")
+            progress_thread = Thread(
+                target=self.print_data_product_progress,
+                args=(source_directory, finished_downloading_source),
+            )
+            progress_thread.start()
+            self.download_data_products(data_directory, source["ra"], source["dec"])
+            finished_downloading_source.set()
+            self.sources_downloaded += 1
+            progress_thread.join()
+
+            self.downloaded_source_queue.put(source_directory)
+        self.downloaded_source_queue.put(None)
+        self.download_message_queue.put(None)
+
+    def process(self):
+        """Feeds downloaded sources to the class where they will be processed, plotted, and
+        exported. Catches any errors and exits with exit faliure so they will be logged."""
+        LightcurveGenerator(self.config["Output Directory"], self.config["Binsize"])
+        while True:
+            source = self.downloaded_source_queue.get()
+            if source is None:
+                self.downloaded_source_queue.task_done()
+                break
+            self.process_message_queue.put("Processing: " + source)
+            time.sleep(2)
+            try:
+                pass
+            # This still meets PEP8 standards, since it's just logging and terminating ASAP.
+            # pylint: disable-next=broad-except
+            except Exception as exception:
+                self.process_message_queue.put(exception)
+                self.process_message_queue.join()
+                sys.exit(1)
+            self.process_message_queue.put("Done with: " + source)
+            self.downloaded_source_queue.task_done()
+            self.sources_processed += 1
+            time.sleep(0.1)
+        self.process_message_queue.put(None)
+
+    def download_and_process(self):
+        """Manages the threads and queues that do the downloading, processing, and terminal output.
+        Holds the instance to the output thread class and dependency injects into it. This method
+        blocks the program until all threads and queues have finished, at which point the program
+        is pretty much done."""
+        download_thread = Thread(target=self.download_all_data_products)
+        process_thread = Thread(target=self.process)
+        download_thread.start()
+        process_thread.start()
+        output_thread = OutputThread(self)
+        output_thread.start()
+        download_thread.join()
+        self.downloaded_source_queue.join()
+        process_thread.join()
+        self.download_message_queue.join()
+        self.process_message_queue.join()
+        output_thread.join()
+
+
+class Terminal:
+    """Static class that handles terminal interaction and state. This class is not meant to be
+    instantiated."""
+
+    N_PROGRESS_BAR_ROWS = 3
+    current_row_left, current_row_right = 0, 0
+    # Immutable stores of the most recent data handed to the terminal to be written.
+    left_column_backup, right_column_backup = (), ()
+
+    @staticmethod
+    def width():
+        """Returns latest terminal width."""
+        return shutil.get_terminal_size().columns
+
+    @staticmethod
+    def height():
+        """Returns latest terminal height."""
+        return shutil.get_terminal_size().lines
+
+    @staticmethod
+    def clear():
+        """Clears the visible terminal with ANSI codes. Data should be buffered somewhere to avoid
+        it being lost."""
+        lines = Terminal.height()
+        for _ in range(lines):
+            print("\033[2K\033[1A", end="")
+
+    @classmethod
+    def set_scroll(cls, left_column_count, right_column_count):
+        """When the terminal window runs out of space to display all messages in either column,
+        moves the current row so on the next write call only the latest messages will be written,
+        thus creating a scrolling behavior."""
+        max_rows = cls.height() - cls.N_PROGRESS_BAR_ROWS
+        max_scroll_left = max(left_column_count, max_rows)
+        max_scroll_right = max(right_column_count, max_rows)
+        if cls.current_row_left < max_scroll_left - max_rows:
+            cls.current_row_left += 1
+        if cls.current_row_right < max_scroll_right - max_rows:
+            cls.current_row_right += 1
+
+    @classmethod
+    def write_columns(cls, left_column, right_column, *args):
+        """Prints in a two column format, adjusting for escape sequences, with progress bars at the
+        bottom. Prints the latest messages from the buffer that can fit on the screen. Backups
+        buffer every time so the backup is up-to-date for logging."""
+        max_rows = cls.height() - cls.N_PROGRESS_BAR_ROWS
+        cls.left_column_backup, cls.right_column_backup = tuple(left_column), tuple(right_column)
+        for left_message, right_message in zip_longest(
+            left_column[cls.current_row_left : cls.current_row_left + max_rows],
+            right_column[cls.current_row_right : cls.current_row_right + max_rows],
+            fillvalue="",
+        ):
+
+            def get_visible_length(message):
+                """Applies regex to find length of the string minus escape sequences."""
+                return len(re.sub(r"\\.", "", repr(message)[1:-1]))
+
+            column_width = cls.width() // 2
+            left_visible_length = get_visible_length(left_message)
+            right_visible_length = get_visible_length(right_message)
+            left_allowed_width = column_width + len(left_message) - left_visible_length
+            right_allowed_width = column_width + len(right_message) - right_visible_length
+            left_message = left_message.ljust(left_allowed_width)
+            right_message = right_message.ljust(right_allowed_width)
+            # Truncate message if exceeding terminal width
+            if left_visible_length > column_width:
+                left_message = left_message[: left_allowed_width - 3] + "..."
+            if right_visible_length > column_width:
+                right_message = right_message[: right_allowed_width - 3] + "..."
+            print(f"{left_message}{right_message}", end="\r\n")
+
+        for progress_bar in range(cls.N_PROGRESS_BAR_ROWS):
+            # Make a new line if not the last row.
+            new_line = "\n" if not progress_bar == cls.N_PROGRESS_BAR_ROWS - 1 else ""
+            print(str(args[progress_bar]), end=f"\r{new_line}")
+
+    @classmethod
+    def dump_to_log(cls, logs_directory):
+        """Dump the latest backup of column data (updated each write cycle) to a specified log
+        file. This is called on program crash in case of any interruptions."""
+        log_file = logs_directory + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".log"
+        with open(log_file, mode="w", encoding="utf-8") as file:
+            file.write("Test")
+
+
+class OutputThread(Thread):
+    """Displays messages from downloading and processing, as well as progress bars."""
+
+    def __init__(self, source_manager):
+        Thread.__init__(self)
+        self.source_manager = source_manager
+        self.done_downloading, self.done_processing = False, False
+        self.queues_complete = False
+        self.left_column, self.right_column = ["- Download -"], ["- Process -"]
+        self.progress_bars = {}
+
+    def run(self):
+        print("\n" * Terminal.height(), end="")  # Make space for output.
+        self.init_progress_bars()
+        while True:
+            if self.queues_complete:
+                break
+            if not self.append_new_messages():
+                time.sleep(0.01)
+                continue
+            self.update_progress_bar_extras()
+            Terminal.clear()
+            Terminal.set_scroll(len(self.left_column), len(self.right_column))
+            Terminal.write_columns(
+                self.left_column, self.right_column, *self.progress_bars.values()
+            )
+        while True:
+            print("")
+            print_log_location()
+            print("Press q to quit, or scroll with arrow keys to view output.")
+            input()
+
+    def append_new_messages(self):
+        """"""  # Returns 0 (False) if no messages, returns 1 (True) if messages
+        download_message, process_message = "", ""
+        with suppress(Empty):
+            download_message = self.source_manager.download_message_queue.get_nowait()
+        with suppress(Empty):
+            process_message = self.source_manager.process_message_queue.get_nowait()
+
+        download_message_present = download_message != ""
+        process_message_present = process_message != ""
+
+        if not download_message_present and not process_message_present:
+            return 0  # No new messages recieved to print
+
+        if download_message is None:
+            self.done_downloading = True
+        elif download_message_present:
+            # In an effort to minimize lines in the buffer, this will effectively collapse
+            # messages giving exact progress. A leading "\r" escape character functionally does
+            # nothing; The carraige returns are handled elsewhere, but it's being used as a
+            # semantic arbitrary key that can be used to determine if the last message should be
+            # collapsed.
+            if download_message.startswith("\r") and self.left_column[-1].startswith("\r"):
+                self.left_column.pop()
+            self.left_column.append(download_message)
+            self.source_manager.download_message_queue.task_done()
+
+        if process_message is None:
+            self.done_processing = True
+        elif process_message_present:
+            self.right_column.append(process_message)
+            self.source_manager.process_message_queue.task_done()
+
+        if self.done_downloading and self.done_processing:
+            self.source_manager.download_message_queue.task_done()
+            self.source_manager.process_message_queue.task_done()
+            self.queues_complete = True
+            return 0
+        self.progress_bars["download"].n = self.source_manager.sources_downloaded
+        self.progress_bars["process"].n = self.source_manager.sources_processed
+        self.progress_bars["total"].n = (
+            self.source_manager.sources_downloaded + self.source_manager.sources_processed
+        ) / 2
+
+        return 1
+
+    def init_progress_bars(self):
+        """Creates progress bar objects, and assigns initial properties."""
+        with open(os.devnull, "w", encoding="utf-8") as devnull:
+            self.progress_bars = {
+                "download": tqdm(
+                    total=len(self.source_manager.sources),
+                    desc="Downloaded Sources:",
+                    file=devnull,
+                    colour="blue",
+                    ncols=Terminal.width(),
+                    unit="source",
+                    bar_format="{desc} {percentage:3.0f}%|{bar}| "
+                    "{n_fmt}/{total_fmt} [{elapsed}<{remaining}    ",
+                ),
+                "process": tqdm(
+                    total=len(self.source_manager.sources),
+                    desc="Processed Sources:",
+                    file=devnull,
+                    colour="green",
+                    ncols=Terminal.width(),
+                    bar_format="{desc} {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}    ",
+                ),
+                "total": tqdm(
+                    total=len(self.source_manager.sources),
+                    desc="Total Progress:",
+                    file=devnull,
+                    colour="black",
+                    ncols=Terminal.width(),
+                    bar_format="{desc} {percentage:3.0f}%|{bar}| {postfix}",
+                ),
+            }
+            # Adjust spacing so bars are aligned
+            longest_description_length = max(
+                len(progress_bar.desc) for progress_bar in self.progress_bars.values()
+            )
+            for progress_bar in self.progress_bars.values():
+                progress_bar.desc = progress_bar.desc.ljust(longest_description_length)
+
+    def update_progress_bar_extras(self):
+        """Update dynamic parts of the progress bar other than the progress."""
+        for progress_bar in self.progress_bars.values():
+            progress_bar.ncols = Terminal.width()
+
+        if self.done_downloading:
+            self.progress_bars["process"].bar_format = (
+                "{desc} {percentage:3.0f}%|{bar}| "
+                + "{n_fmt}/{total_fmt} [{elapsed}<{remaining}    "
+            )
+
+        self.progress_bars["total"].postfix = (
+            f"\b\b{threading.active_count()} threads, "
+            f"RAM used: {psutil.Process().memory_info().rss / 1e6:.2f} MB. PID: {os.getpid()}"
+        )
+
+
+def print_log_location():
+    log_path = ""
+    if sys.exc_info()[0] is SystemExit:
+        if sys.exc_info()[1].code == 0:
+            print("Application exited gracefully.")
+            return  # No error
+        print(f"Application encountered an error. Log saved to {log_path}.")
+    else:
+        print(f"Log saved to {log_path}.")
+
+
+atexit.register(print_log_location)

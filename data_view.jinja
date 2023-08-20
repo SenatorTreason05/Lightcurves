@@ -31,6 +31,11 @@
       padding: 7px;
       text-align: center;
     }
+
+    p {
+      border: 1px dashed;
+      padding: 15px;
+    }
   </style>
 </head>
 
@@ -62,8 +67,9 @@
       {% endfor %}
     </tr>
     <tr>
-      <td colspan="{{ observation[0].keys().__len__() }}"><img src="{{ observation[1] }}"
-          alt="Plot not found, data corrupted?"></td>
+      <td colspan="{{ observation[0].keys().__len__() }}">
+        {{ observation[1] }}
+      </td>
     </tr>
     {% endfor %}
   </table>
