@@ -1,6 +1,7 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 import gzip
 from pathlib import Path
+from multiprocessing import Process
 
 
 class LightcurveGenerator:
@@ -10,7 +11,7 @@ class LightcurveGenerator:
         self.error_queue = None
 
     @staticmethod
-    def unzip_fits_files(observation_path: Path):
+    def unzip_fits_files(observation_path):
         """Files are downloaded in a GNU Zip format. This unzips all files in an observation
         directory into the FITS files we need."""
         gzip_files = observation_path.glob("*.gz")
@@ -24,6 +25,9 @@ class LightcurveGenerator:
         except OSError as error:
             raise OSError(f"Could not unzip {observation_id}! Details: {error.args}") from error
 
+    def extract_lightcurves(self):
+        pass
+
     @staticmethod
     def adjust_binsize(binsize, time_resolution):
         """For ACIS, time resolution can be in the seconds in timed exposure mode, as compared to in the microseconds for HRC."""
@@ -34,3 +38,7 @@ class LightcurveGenerator:
         observation_path = Path(path_to_observation)
         if not (observation_path.exists() and observation_path.is_dir()):
             raise OSError(f"Observation directory {path_to_observation} not found.")
+
+
+class ObservationProcessor(Process):
+    pass

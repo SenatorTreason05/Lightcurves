@@ -1,12 +1,13 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
-import atexit
 import os
 import re
 import shutil
 import sys
 import threading
 import time
+import uuid
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime
 from glob import glob
 from itertools import zip_longest
@@ -91,18 +92,19 @@ class SourceManager:
         """Checks and reports how many files have been downloaded."""
         complete = False
         last_progress_message = ""
+        message_uuid = uuid.uuid4()
         download_start_time = time.time()
         while True:
             source_directory_exists = path.isdir(source_directory)
             observation_count = len(os.listdir(source_directory)) if source_directory_exists else 0
             data_products_count = len(glob(path.join(source_directory, "**/*.gz"), recursive=True))
             message = (
-                f"\rRetrieved {observation_count} observations, "
+                f"Retrieved {observation_count} observations, "
                 f"{data_products_count} data products. "
                 f"({(time.time() - download_start_time):.2f}s)"
             )
             if message != last_progress_message:
-                self.download_message_queue.put(message)
+                self.download_message_queue.put(Message(message, message_uuid))
             last_progress_message = message
             if finished_downloading_source.is_set() and not complete:
                 complete = True  # This flag allows the loop to run a final time before finishing.
@@ -122,7 +124,9 @@ class SourceManager:
             finished_downloading_source = Event()
             source_directory = path.join(data_directory, source["name"].replace(" ", ""))
             progress = f"{(source_count)}/{len(self.sources)}"
-            self.download_message_queue.put(f"Downloading source {source['name']}... {progress}")
+            self.download_message_queue.put(
+                Message(f"Downloading source {source['name']}... {progress}")
+            )
             progress_thread = Thread(
                 target=self.print_data_product_progress,
                 args=(source_directory, finished_downloading_source),
@@ -146,17 +150,17 @@ class SourceManager:
             if source is None:
                 self.downloaded_source_queue.task_done()
                 break
-            self.process_message_queue.put("Processing: " + source)
+            self.process_message_queue.put(Message("Processing: " + source))
             time.sleep(2)
             try:
                 pass
             # This still meets PEP8 standards, since it's just logging and terminating ASAP.
             # pylint: disable-next=broad-except
             except Exception as exception:
-                self.process_message_queue.put(exception)
+                self.process_message_queue.put(Message(exception))
                 self.process_message_queue.join()
                 sys.exit(1)
-            self.process_message_queue.put("Done with: " + source)
+            self.process_message_queue.put(Message("Done with: " + source))
             self.downloaded_source_queue.task_done()
             self.sources_processed += 1
             time.sleep(0.1)
@@ -231,8 +235,10 @@ class Terminal:
         for left_message, right_message in zip_longest(
             left_column[cls.current_row_left : cls.current_row_left + max_rows],
             right_column[cls.current_row_right : cls.current_row_right + max_rows],
-            fillvalue="",
+            fillvalue=Message(""),
         ):
+            left_message = left_message.message
+            right_message = right_message.message
 
             def get_visible_length(message):
                 """Applies regex to find length of the string minus escape sequences."""
@@ -274,17 +280,17 @@ class OutputThread(Thread):
         self.source_manager = source_manager
         self.done_downloading, self.done_processing = False, False
         self.queues_complete = False
-        self.left_column, self.right_column = ["- Download -"], ["- Process -"]
+        self.left_column, self.right_column = [Message("- Download -")], [Message("- Process -")]
         self.progress_bars = {}
 
     def run(self):
+        print("...")
         print("\n" * Terminal.height(), end="")  # Make space for output.
         self.init_progress_bars()
         while True:
             if self.queues_complete:
                 break
-            if not self.append_new_messages():
-                time.sleep(0.01)
+            if not self.check_and_handle_messages():
                 continue
             self.update_progress_bar_extras()
             Terminal.clear()
@@ -298,16 +304,18 @@ class OutputThread(Thread):
             print("Press q to quit, or scroll with arrow keys to view output.")
             input()
 
-    def append_new_messages(self):
-        """"""  # Returns 0 (False) if no messages, returns 1 (True) if messages
-        download_message, process_message = "", ""
+    def check_and_handle_messages(self):
+        """Polls queues, if there is a new message it is added to the message buffer so it can be
+        printed to the console on the next write. Updates progress bar progress. Returns 0 if there
+        are no new messages, returns 1 if there are; this way the loop knows when to skip."""
+        download_message, process_message = Message(""), Message("")
         with suppress(Empty):
             download_message = self.source_manager.download_message_queue.get_nowait()
         with suppress(Empty):
             process_message = self.source_manager.process_message_queue.get_nowait()
 
-        download_message_present = download_message != ""
-        process_message_present = process_message != ""
+        download_message_present = download_message != Message("")
+        process_message_present = process_message != Message("")
 
         if not download_message_present and not process_message_present:
             return 0  # No new messages recieved to print
@@ -315,20 +323,13 @@ class OutputThread(Thread):
         if download_message is None:
             self.done_downloading = True
         elif download_message_present:
-            # In an effort to minimize lines in the buffer, this will effectively collapse
-            # messages giving exact progress. A leading "\r" escape character functionally does
-            # nothing; The carraige returns are handled elsewhere, but it's being used as a
-            # semantic arbitrary key that can be used to determine if the last message should be
-            # collapsed.
-            if download_message.startswith("\r") and self.left_column[-1].startswith("\r"):
-                self.left_column.pop()
-            self.left_column.append(download_message)
+            self.update_column(download_message, self.left_column)
             self.source_manager.download_message_queue.task_done()
 
         if process_message is None:
             self.done_processing = True
         elif process_message_present:
-            self.right_column.append(process_message)
+            self.update_column(process_message, self.right_column)
             self.source_manager.process_message_queue.task_done()
 
         if self.done_downloading and self.done_processing:
@@ -343,6 +344,18 @@ class OutputThread(Thread):
         ) / 2
 
         return 1
+
+    @staticmethod
+    def update_column(incoming_message, column):
+        """Either appends a new message to a column, or replaces one if its UUID matches an
+        exisiting one. NOTE passing in a novel UUID labeled message will traverse the entire
+        column list, this could be slow for large columns."""
+        if incoming_uuid := incoming_message.message_uuid:
+            for index, element in enumerate(reversed(column), 1):
+                if element.message_uuid == incoming_uuid:
+                    column[-index] = incoming_message
+                    return
+        column.append(incoming_message)
 
     def init_progress_bars(self):
         """Creates progress bar objects, and assigns initial properties."""
@@ -399,7 +412,17 @@ class OutputThread(Thread):
         )
 
 
+@dataclass(frozen=True)
+class Message:
+    """Holds an optional uuid field, this is used for when you want to track and update a single
+    message in the buffer rather than constantly appending."""
+
+    message: str
+    message_uuid: str = None
+
+
 def print_log_location():
+    """Handle exit code, get log, and print the file path of the new log file."""
     log_path = ""
     if sys.exc_info()[0] is SystemExit:
         if sys.exc_info()[1].code == 0:
@@ -408,6 +431,3 @@ def print_log_location():
         print(f"Application encountered an error. Log saved to {log_path}.")
     else:
         print(f"Log saved to {log_path}.")
-
-
-atexit.register(print_log_location)
