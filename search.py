@@ -5,13 +5,13 @@ import shutil
 import sys
 import threading
 import time
+import traceback
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
-from glob import glob
 from itertools import zip_longest
-from os import path
+from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
 
@@ -35,8 +35,9 @@ class SourceManager:
     def __init__(self, config):
         self.config = config
         self.sources = []
-        self.downloaded_source_queue = None
+        self.downloaded_source_queue: Queue[Path] = None
         self.download_message_queue, self.process_message_queue = Queue(), Queue()
+        self.process_error_event = Event()
         self.sources_downloaded, self.sources_processed = 0, 0
 
     def search_csc(self):
@@ -88,16 +89,15 @@ class SourceManager:
             clobber="1",
         )
 
-    def print_data_product_progress(self, source_directory, finished_downloading_source):
+    def print_data_product_progress(self, source_directory: Path, finished_downloading_source):
         """Checks and reports how many files have been downloaded."""
         complete = False
         last_progress_message = ""
         message_uuid = uuid.uuid4()
         download_start_time = time.time()
         while True:
-            source_directory_exists = path.isdir(source_directory)
-            observation_count = len(os.listdir(source_directory)) if source_directory_exists else 0
-            data_products_count = len(glob(path.join(source_directory, "**/*.gz"), recursive=True))
+            observation_count = len(list(source_directory.glob("*")))
+            data_products_count = len(list(source_directory.rglob("**/*.gz")))
             message = (
                 f"Retrieved {observation_count} observations, "
                 f"{data_products_count} data products. "
@@ -111,18 +111,18 @@ class SourceManager:
                 continue
             if complete:
                 break
-            time.sleep(0.1)
+            time.sleep(0.2)
 
     def download_all_data_products(self):
         """Goes through all CSC results, finds their coordinates and requests their data products.
         Spins up another thread as a child to this one to handle counting and reporting the number
         of data products downloaded in the file system."""
-        data_directory = self.config["Data Directory"]
+        data_directory = Path(self.config["Data Directory"])
         shutil.rmtree(data_directory, ignore_errors=True)
         source_count = 0
         for source_count, source in enumerate(self.sources, 1):
             finished_downloading_source = Event()
-            source_directory = path.join(data_directory, source["name"].replace(" ", ""))
+            source_directory = data_directory / source["name"].replace(" ", "")
             progress = f"{(source_count)}/{len(self.sources)}"
             self.download_message_queue.put(
                 Message(f"Downloading source {source['name']}... {progress}")
@@ -136,31 +136,40 @@ class SourceManager:
             finished_downloading_source.set()
             self.sources_downloaded += 1
             progress_thread.join()
-
             self.downloaded_source_queue.put(source_directory)
         self.downloaded_source_queue.put(None)
         self.download_message_queue.put(None)
 
     def process(self):
         """Feeds downloaded sources to the class where they will be processed, plotted, and
-        exported. Catches any errors and exits with exit faliure so they will be logged."""
-        LightcurveGenerator(self.config["Output Directory"], self.config["Binsize"])
+        exported. Catches any errors and signals to main thread to stop."""
+
         while True:
+            # lc = LightcurveGenerator(
+            #     self.config["Output Directory"],
+            #     self.config["Binsize"],
+            #     self.process_message_queue,
+            # )
             source = self.downloaded_source_queue.get()
+            # lc.queue_source(source)
             if source is None:
                 self.downloaded_source_queue.task_done()
                 break
-            self.process_message_queue.put(Message("Processing: " + source))
-            time.sleep(2)
+            self.process_message_queue.put(Message("Processing: " + source.name))
+
             try:
                 pass
             # This still meets PEP8 standards, since it's just logging and terminating ASAP.
             # pylint: disable-next=broad-except
-            except Exception as exception:
-                self.process_message_queue.put(Message(exception))
-                self.process_message_queue.join()
-                sys.exit(1)
-            self.process_message_queue.put(Message("Done with: " + source))
+            except Exception:
+                exception = sys.exc_info()[1]
+                exception_traceback = traceback.format_exc().replace("\n", " ")
+                self.process_message_queue.put(Message(f"{exception} - {exception_traceback}"))
+                self.process_message_queue.put(None)
+                self.download_message_queue.put(None)
+                self.process_error_event.set()
+                raise
+            self.process_message_queue.put(Message("Done with: " + source.name))
             self.downloaded_source_queue.task_done()
             self.sources_processed += 1
             time.sleep(0.1)
@@ -171,18 +180,27 @@ class SourceManager:
         Holds the instance to the output thread class and dependency injects into it. This method
         blocks the program until all threads and queues have finished, at which point the program
         is pretty much done."""
-        download_thread = Thread(target=self.download_all_data_products)
-        process_thread = Thread(target=self.process)
+        outputting = self.config["Enable Output"]
+        # Stop default exception printing behavior
+        if outputting:
+            threading.excepthook = lambda: None
+        download_thread = Thread(target=self.download_all_data_products, daemon=True)
+        process_thread = Thread(target=self.process, daemon=True)
         download_thread.start()
         process_thread.start()
-        output_thread = OutputThread(self)
+        output_thread = (
+            OutputThread(self) if outputting else Thread(target=lambda: None, daemon=True)
+        )
         output_thread.start()
+        process_thread.join()
+        if self.process_error_event.is_set():
+            output_thread.join()
+            sys.exit(1)
         download_thread.join()
         self.downloaded_source_queue.join()
-        process_thread.join()
-        self.download_message_queue.join()
-        self.process_message_queue.join()
-        output_thread.join()
+        if outputting:
+            self.download_message_queue.join()
+            self.process_message_queue.join()
 
 
 class Terminal:
@@ -225,6 +243,11 @@ class Terminal:
         if cls.current_row_right < max_scroll_right - max_rows:
             cls.current_row_right += 1
 
+    @staticmethod
+    def get_visible_length(message):
+        """Applies regex to find length of the string minus escape sequences."""
+        return len(re.sub(r"\\.", "", repr(message)[1:-1]))
+
     @classmethod
     def write_columns(cls, left_column, right_column, *args):
         """Prints in a two column format, adjusting for escape sequences, with progress bars at the
@@ -237,21 +260,17 @@ class Terminal:
             right_column[cls.current_row_right : cls.current_row_right + max_rows],
             fillvalue=Message(""),
         ):
-            left_message = left_message.message
-            right_message = right_message.message
-
-            def get_visible_length(message):
-                """Applies regex to find length of the string minus escape sequences."""
-                return len(re.sub(r"\\.", "", repr(message)[1:-1]))
+            left_message = left_message.content
+            right_message = right_message.content
 
             column_width = cls.width() // 2
-            left_visible_length = get_visible_length(left_message)
-            right_visible_length = get_visible_length(right_message)
+            left_visible_length = cls.get_visible_length(left_message)
+            right_visible_length = cls.get_visible_length(right_message)
             left_allowed_width = column_width + len(left_message) - left_visible_length
             right_allowed_width = column_width + len(right_message) - right_visible_length
             left_message = left_message.ljust(left_allowed_width)
             right_message = right_message.ljust(right_allowed_width)
-            # Truncate message if exceeding terminal width
+            # Truncate message if exceeding terminal width, note this doesn't happen in the log.
             if left_visible_length > column_width:
                 left_message = left_message[: left_allowed_width - 3] + "..."
             if right_visible_length > column_width:
@@ -264,19 +283,27 @@ class Terminal:
             print(str(args[progress_bar]), end=f"\r{new_line}")
 
     @classmethod
-    def dump_to_log(cls, logs_directory):
+    def dump_to_log(cls, log_directory: Path):
         """Dump the latest backup of column data (updated each write cycle) to a specified log
-        file. This is called on program crash in case of any interruptions."""
-        log_file = logs_directory + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".log"
-        with open(log_file, mode="w", encoding="utf-8") as file:
-            file.write("Test")
+        file. This is called on program crash in case of any interruptions. The difference between
+        this and the terminal writing is it performs no truncation or fitting."""
+        log_file_path = log_directory / f"{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.log"
+        with open(log_file_path, mode="w", encoding="utf-8") as file:
+            if max((cls.left_column_backup, cls.right_column_backup), key=len) == 0:
+                file.write("No output captured.")
+            for left_message, right_message in zip_longest(
+                cls.left_column_backup, cls.right_column_backup, fillvalue=Message("")
+            ):
+                spacing = " " * 10
+                file.write(f"{left_message.content}{spacing}{right_message.content}\r\n")
+        return log_file_path
 
 
 class OutputThread(Thread):
     """Displays messages from downloading and processing, as well as progress bars."""
 
     def __init__(self, source_manager):
-        Thread.__init__(self)
+        Thread.__init__(self, daemon=True)
         self.source_manager = source_manager
         self.done_downloading, self.done_processing = False, False
         self.queues_complete = False
@@ -291,6 +318,7 @@ class OutputThread(Thread):
             if self.queues_complete:
                 break
             if not self.check_and_handle_messages():
+                time.sleep(0.05)  # Release GIL for a moment
                 continue
             self.update_progress_bar_extras()
             Terminal.clear()
@@ -298,11 +326,6 @@ class OutputThread(Thread):
             Terminal.write_columns(
                 self.left_column, self.right_column, *self.progress_bars.values()
             )
-        while True:
-            print("")
-            print_log_location()
-            print("Press q to quit, or scroll with arrow keys to view output.")
-            input()
 
     def check_and_handle_messages(self):
         """Polls queues, if there is a new message it is added to the message buffer so it can be
@@ -349,10 +372,10 @@ class OutputThread(Thread):
     def update_column(incoming_message, column):
         """Either appends a new message to a column, or replaces one if its UUID matches an
         exisiting one. NOTE passing in a novel UUID labeled message will traverse the entire
-        column list, this could be slow for large columns."""
-        if incoming_uuid := incoming_message.message_uuid:
+        column list, this could cause performance issues for large columns."""
+        if incoming_uuid := incoming_message.uuid:
             for index, element in enumerate(reversed(column), 1):
-                if element.message_uuid == incoming_uuid:
+                if element.uuid == incoming_uuid:
                     column[-index] = incoming_message
                     return
         column.append(incoming_message)
@@ -417,17 +440,12 @@ class Message:
     """Holds an optional uuid field, this is used for when you want to track and update a single
     message in the buffer rather than constantly appending."""
 
-    message: str
-    message_uuid: str = None
+    content: str
+    uuid: str = None
 
 
 def print_log_location():
-    """Handle exit code, get log, and print the file path of the new log file."""
-    log_path = ""
-    if sys.exc_info()[0] is SystemExit:
-        if sys.exc_info()[1].code == 0:
-            print("Application exited gracefully.")
-            return  # No error
-        print(f"Application encountered an error. Log saved to {log_path}.")
-    else:
-        print(f"Log saved to {log_path}.")
+    """Call a log dump, and print the file path of the new log file."""
+    log_directory = Path("./logs")
+    log_directory.mkdir(exist_ok=True)
+    print(f"\nLog saved to {Terminal.dump_to_log(log_directory)}.")
