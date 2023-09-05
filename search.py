@@ -8,7 +8,6 @@ import time
 import traceback
 import uuid
 from contextlib import suppress
-from dataclasses import dataclass
 from datetime import datetime
 from itertools import zip_longest
 from pathlib import Path
@@ -26,6 +25,7 @@ from pyvo import DALFormatError, dal
 from tqdm import tqdm
 
 from lightcurve import LightcurveGenerator
+from message import Message
 
 
 class SourceManager:
@@ -37,7 +37,6 @@ class SourceManager:
         self.sources = []
         self.downloaded_source_queue: Queue[Path] = None
         self.download_message_queue, self.process_message_queue = Queue(), Queue()
-        self.process_error_event = Event()
         self.sources_downloaded, self.sources_processed = 0, 0
 
     def search_csc(self):
@@ -49,7 +48,7 @@ class SourceManager:
             sky_coord = SkyCoord.from_name(object_name)
             cone_search = dal.SCSService("http://cda.cfa.harvard.edu/csc2scs/coneSearch")
             print("Searching CSC sources...")
-            start_time = time.time()
+            start_time = time.perf_counter()
             search_results = cone_search.search(sky_coord, search_radius, verbosity=2)
         except NameResolveError:
             print(f'No results for object "{object_name}".')
@@ -57,7 +56,7 @@ class SourceManager:
         except DALFormatError:
             print("Failed to connect to search service, check internet connection?")
             sys.exit(1)
-        print(f"Found {len(search_results)} sources in {(time.time() - start_time):.3f}s.")
+        print(f"Found {len(search_results)} sources in {(time.perf_counter() - start_time):.3f}s.")
         significant_results = [
             result for result in search_results if result["significance"] >= significance_threshold
         ]
@@ -71,8 +70,8 @@ class SourceManager:
     @staticmethod
     def download_data_products(download_directory, right_ascension, declination):
         """Uses a ciao tool to download certain data products from csc2 for a given source using
-        the obtained celestial sphere coords for a source name. Currently we only need the event
-        file and the source region map."""
+        the obtained celestial sphere coords for a source name. Currently we are only using the
+        event file and the source region map."""
         search_csc(
             pos=f"{right_ascension}, {declination}",
             radius="1.0",
@@ -94,14 +93,14 @@ class SourceManager:
         complete = False
         last_progress_message = ""
         message_uuid = uuid.uuid4()
-        download_start_time = time.time()
+        download_start_time = time.perf_counter()
         while True:
-            observation_count = len(list(source_directory.glob("*")))
-            data_products_count = len(list(source_directory.rglob("**/*.gz")))
+            observation_count = len(tuple(source_directory.glob("*")))
+            data_products_count = len(tuple(source_directory.rglob("**/*.gz")))
             message = (
                 f"Retrieved {observation_count} observations, "
                 f"{data_products_count} data products. "
-                f"({(time.time() - download_start_time):.2f}s)"
+                f"({(time.perf_counter() - download_start_time):.2f}s)"
             )
             if message != last_progress_message:
                 self.download_message_queue.put(Message(message, message_uuid))
@@ -140,25 +139,23 @@ class SourceManager:
         self.downloaded_source_queue.put(None)
         self.download_message_queue.put(None)
 
-    def process(self):
+    def process(self, process_error_event):
         """Feeds downloaded sources to the class where they will be processed, plotted, and
         exported. Catches any errors and signals to main thread to stop."""
 
+        lightcurve_generator = LightcurveGenerator(
+            self.config["Output Directory"],
+            self.config["Binsize"],
+            self.process_message_queue,
+        )
         while True:
-            # lc = LightcurveGenerator(
-            #     self.config["Output Directory"],
-            #     self.config["Binsize"],
-            #     self.process_message_queue,
-            # )
             source = self.downloaded_source_queue.get()
-            # lc.queue_source(source)
             if source is None:
                 self.downloaded_source_queue.task_done()
                 break
             self.process_message_queue.put(Message("Processing: " + source.name))
-
             try:
-                pass
+                lightcurve_generator.process_source(source)
             # This still meets PEP8 standards, since it's just logging and terminating ASAP.
             # pylint: disable-next=broad-except
             except Exception:
@@ -167,7 +164,7 @@ class SourceManager:
                 self.process_message_queue.put(Message(f"{exception} - {exception_traceback}"))
                 self.process_message_queue.put(None)
                 self.download_message_queue.put(None)
-                self.process_error_event.set()
+                process_error_event.set()
                 raise
             self.process_message_queue.put(Message("Done with: " + source.name))
             self.downloaded_source_queue.task_done()
@@ -181,11 +178,12 @@ class SourceManager:
         blocks the program until all threads and queues have finished, at which point the program
         is pretty much done."""
         outputting = self.config["Enable Output"]
+        process_error_event = Event()
         # Stop default exception printing behavior
         if outputting:
-            threading.excepthook = lambda: None
+            threading.excepthook = lambda exception: exception
         download_thread = Thread(target=self.download_all_data_products, daemon=True)
-        process_thread = Thread(target=self.process, daemon=True)
+        process_thread = Thread(target=self.process, args=(process_error_event,), daemon=True)
         download_thread.start()
         process_thread.start()
         output_thread = (
@@ -193,7 +191,7 @@ class SourceManager:
         )
         output_thread.start()
         process_thread.join()
-        if self.process_error_event.is_set():
+        if process_error_event.is_set():
             output_thread.join()
             sys.exit(1)
         download_thread.join()
@@ -243,11 +241,6 @@ class Terminal:
         if cls.current_row_right < max_scroll_right - max_rows:
             cls.current_row_right += 1
 
-    @staticmethod
-    def get_visible_length(message):
-        """Applies regex to find length of the string minus escape sequences."""
-        return len(re.sub(r"\\.", "", repr(message)[1:-1]))
-
     @classmethod
     def write_columns(cls, left_column, right_column, *args):
         """Prints in a two column format, adjusting for escape sequences, with progress bars at the
@@ -260,21 +253,14 @@ class Terminal:
             right_column[cls.current_row_right : cls.current_row_right + max_rows],
             fillvalue=Message(""),
         ):
-            left_message = left_message.content
-            right_message = right_message.content
-
             column_width = cls.width() // 2
-            left_visible_length = cls.get_visible_length(left_message)
-            right_visible_length = cls.get_visible_length(right_message)
-            left_allowed_width = column_width + len(left_message) - left_visible_length
-            right_allowed_width = column_width + len(right_message) - right_visible_length
-            left_message = left_message.ljust(left_allowed_width)
-            right_message = right_message.ljust(right_allowed_width)
+            left_message = left_message.content.ljust(column_width)
+            right_message = right_message.content.ljust(column_width)
             # Truncate message if exceeding terminal width, note this doesn't happen in the log.
-            if left_visible_length > column_width:
-                left_message = left_message[: left_allowed_width - 3] + "..."
-            if right_visible_length > column_width:
-                right_message = right_message[: right_allowed_width - 3] + "..."
+            if len(left_message) > column_width:
+                left_message = left_message[: column_width - 3] + "..."
+            if len(right_message) > column_width:
+                right_message = right_message[: column_width - 3] + "..."
             print(f"{left_message}{right_message}", end="\r\n")
 
         for progress_bar in range(cls.N_PROGRESS_BAR_ROWS):
@@ -433,15 +419,6 @@ class OutputThread(Thread):
             f"\b\b{threading.active_count()} threads, "
             f"RAM used: {psutil.Process().memory_info().rss / 1e6:.2f} MB. PID: {os.getpid()}"
         )
-
-
-@dataclass(frozen=True)
-class Message:
-    """Holds an optional uuid field, this is used for when you want to track and update a single
-    message in the buffer rather than constantly appending."""
-
-    content: str
-    uuid: str = None
 
 
 def print_log_location():
