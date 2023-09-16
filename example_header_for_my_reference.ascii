@@ -1,0 +1,204 @@
+HDUCLASS             ASC                            Region extension
+DATE                 2015-05-13T10:33:34            Date and time of file creation
+MJD_OBS                  53380.3719301040           Modified Julian date of observation
+DS_IDENT             ADS/Sa.CXO#2CSC/obs/04544      dataset identifier
+DATE-OBS             2005-01-10T08:55:34            Observation start date
+DATE-END             2005-01-10T11:59:21            Observation end date
+TIMESYS              TT                             Time system
+MJDREF                   50814.0                    MJD zero point for times [d]
+TIMEZERO                                0           Clock correction [s]
+TIMEUNIT             s                              Time unit
+BTIMNULL             217695921.3170599937           Basic Time offset (s)
+BTIMRATE                 0.25625001147218           Basic Time clock rate (s / VCDUcount)
+BTIMDRFT                  5.111670693E-18           Basic Time clock drift (s / VCDUcount^2)
+BTIMCORR                                0           Correction applied to Basic Time rate (s)
+TIMEREF              LOCAL                          Time reference (barycenter/local)
+TASSIGN              SATELLITE                      Time assigned by clock
+CLOCKAPP             TRUE                           default
+TIERRELA                            1E-09           default
+TIERABSO                            5E-05           default
+TIMVERSN             ASC-FITS-2                     Timing system definition
+TSTART               221734534.7610000074           Observation start time (MET) [s]
+TSTOP                221745561.7114900053           Observation end time (MET) [s]
+OBS_MODE             POINTING                       Observation mode
+STARTMJF             123116                         Major frame ctr value at start of data
+STARTMNF             28                             Start minor frame ctr at start of data
+STARTOBT                                0           On-Board MET close to STARTMJF and STARTMNF
+STOPMJF              123446                         Major frame ctr value at stop of data
+STOPMNF              42                             Stop minor frame ctr at end of data
+TIMEPIXR                 0.50                       default
+DATACLAS             OBSERVED                       default
+RADESYS              ICRS                           default
+TIMEDEL                      1.641040               timedel Lev1 [s]
+MISSION              AXAF                           Mission
+TELESCOP             CHANDRA                        Telescope
+SIM_X                   -0.68282252473119           SIM focus pos [mm]
+SIM_Y                                   0           SIM orthogonal axis pos [mm]
+SIM_Z                     -190.1425803652           SIM translation stage pos [mm]
+FOC_LEN                  10070.0                    HRMA focal length [mm]
+INSTRUME             ACIS                           Instrument
+GRATING              NONE                           Grating
+DETNAM               ACIS-678                       Detector
+RA_PNT                     205.5523446646           Pointing RA [deg]
+DEC_PNT                     28.3838453814           Pointing Dec [deg]
+ROLL_PNT                    69.0171133115           Pointing Roll [deg]
+RA_TARG                    205.5466670              Observer's specified target RA [deg]
+DEC_TARG                    28.3755560              Observer's specified target Dec [deg]
+DEFOCUS                  0.00144493656871           SIM defocus [mm]
+RA_NOM                     205.5547683440           Nominal RA [deg]
+DEC_NOM                     28.3810733762           Nominal Dec [deg]
+ROLL_NOM                    69.0171133115           Nominal Roll [deg]
+READMODE             TIMED                          Read mode
+ACSYS1               CHIP:AXAF-ACIS-1.0             reference for chip coord system
+ACSYS2               TDET:ACIS-2.2                  reference for tiled detector coord system
+ACSYS3               DET:ASC-FP-1.1                 reference for focal plane coord system
+ACSYS4               SKY:ASC-FP-1.1                 reference for sky coord system
+GAINFILE             acisD2000-01-29gain_ctiN0006.fits 
+CTI_CORR             TRUE                           
+CTI_APP              PPPPPBPBPP                     
+CTIFILE              acisD2002-08-01ctiN0007.fits   
+MTLFILE              acisf04544_000N003_mtl1.fits   
+TGAINCOR             T                              
+TGAINFIL             acisD2004-11-01t_gainN0006.fits 
+GRD_FILE             acisD1996-11-01gradeN0004.fits 
+CORNERS              2                              num adjacent side pix > threshold to include co
+GRADESYS             ASCA                           grade system: ASCA, ACIS, or USER
+BPIXFILE             acisf04544_000N020_bpix3.fits  
+DATAMODE             VFAINT                         Data mode
+RUN_ID               1                              Science run index
+FSW_VERS             31                             ACIS flight software version number
+STARTBEP             39527201                       BEP timer value at TSTART
+STOPBEP              1043351369                     BEP timer value at TSTOP
+FEP_ID               1                              Front End Processor ID: 0-5
+CCD_ID               7                              CCD ID: 0-9
+TIMEDELA                     1.641040               Inferred duration of primary exposure (s)
+TIMEDELB                                0           Inferred duration of secondary exp. (s)
+FLSHTIME                                0 [s]       
+EXPTIME                      1.60 [s]               
+DTYCYCLE             0                              
+FIRSTROW             257                            Index of first row of CCD (sub)array readout
+NROWS                512                            Number of rows in (sub)array readout
+FLSHTIMA                                0           Inferred duration of flush before primary fram
+FLSHTIMB                                0           Inferred duration of flush before secondary fr
+CYCLE                P                              events from which exps? Prim/Second/Both
+ASCDSVER             CAT4.3.10                      Processing system revision
+ASOLFILE             pcadf04544_000N020_asol3.fits  
+THRFILE              acisD1996-11-01evtspltN0002.fits 
+TLMVER               P009                           Telemetry revision number (IP&CL)
+REVISION             21                             
+CHECKSUM             oC9qp98noC8no98n               HDU checksum updated 2016-07-24T04:22:21
+DATASUM              3294457800                     data unit checksum updated 2016-07-24T04:22:21
+HDUCLAS1             REGION                         Region extension
+HDUCLAS2             SRC                            Region extension
+PIX_ADJ              EDSER                          Subpixel adjustment algorithm
+RAND_SKY                                0           
+SUBPIXFL             acisD1999-07-22subpixN0001.fits 
+RAND_PI                      1.0                    
+CONTENT              SRCREG                         Level3 file
+HDUSPEC              ACIS Telemetry Products: Level 0 to ASC Archive ICD Rev 2.11 ICD r
+HDUDOC               ASC-FITS-2.0: McDowell, Rots: ASC FITS File Designers Guide 
+HDUVERS              1.0.0                          
+HISTNUM              858                            
+OBJECT               M3                             Source name
+OBS_ID               4544                           Observation id
+OBI_NUM              0                              Obi number
+SEQ_NUM              300138                         Sequence number
+ONTIME                    9683.1999638975           Sum of GTIs [s]
+ONTIME7                   9683.1999638975           Sum of GTIs [s]
+ONTIME6                   9681.5589438081           Sum of GTIs [s]
+ONTIME8                   9683.1999638975           Sum of GTIs [s]
+LIVETIME                  9441.0373557232           Livetime [s]
+LIVTIME7                  9441.0373557232           Livetime [s]
+LIVTIME6                  9439.4373751359           Livetime [s]
+LIVTIME8                  9441.0373557232           Livetime [s]
+EXPOSURE                  9441.0373557232           Exposure time [s]
+EXPOSUR7                  9441.0373557232           Exposure time [s]
+EXPOSUR6                  9439.4373751359           Exposure time [s]
+EXPOSUR8                  9441.0373557232           Exposure time [s]
+DTCOR                    0.97499146882465           Dead time correction
+ASPTYPE              KALMAN                         
+BIASFIL7             acisf221734199N003_1_bias0.fits bias file used: CCD 7
+BIASFIL6             acisf221734199N003_2_bias0.fits bias file used: CCD 6
+BIASFIL8             acisf221734199N003_3_bias0.fits bias file used: CCD 8
+FP_TEMP                    153.44601440             Focal Plane Temperature [K]
+AIMPFILE             telD1999-07-23aimptsN0002.fits 
+GEOMFILE             telD1999-07-23geomN0006.fits   
+SKYFILE              telD1999-07-23skyN0002.fits    
+TDETFILE             telD1999-07-23tdetN0001.fits   
+SHELLFIL             telD1999-07-23sgeomN0001.fits  
+FLTFILE              acisf04544_000N003_flt1.fits   
+MASKFILE             acisf04544_000N003_msk1.fits   
+PBKFILE              acisf221734916N003_pbk0.fits   
+DY_AVG                   0.37298882490              Mean DY during observation [mm]
+DZ_AVG                   0.517251276240             Mean DZ during observation [mm]
+DTH_AVG                 -0.00543990551890           Mean DTHETA during observation [deg]
+OCLKPAIR             8                              # of pairs of overclock pixels per output
+ORC_MODE             0                              Output register clocking mode
+SUM_2X2              0                              On-chip summing. 0:None; 1:Sum 2x2
+FEP_CCD              x768xx                         CCD to FEPID mapping, fep0 is left most digit
+CALDBVER             4.6.7                          
+STACK_ID             acisfJ1342131p282251_001       
+GTISTART             221735271.5609999895           Time of first GTI record [s]
+GTISTOP              221744954.7609600127           Time of last GTI record [s]
+ --  HISTORY               TOOL  :dmcopy   2016-07-24T04:22:19                            ASC00020
+ --  HISTORY               PARM  :infile=/export/proc/tmp.ascdsl3/prs_run/tmp//L3AMRF____5ASC00021
+ --  HISTORY               CONT  :85619741n351/output/acisf04544_000N021_r0009b_reg3.fits[ASC00022
+ --  HISTORY               CONT  :ECF90REG][ECF90REGB]                                    ASC00023
+ --  HISTORY               PARM  :outfile=/export/proc/tmp.ascdsl3/prs_run/tmp//L3AMRF____ASC00024
+ --  HISTORY               CONT  :585619741n351/output/acisf04544_000N021_r0009_reg3.fits ASC00025
+ --  HISTORY               PARM  :kernel=default                                          ASC00026
+ --  HISTORY               PARM  :option=                                                 ASC00027
+ --  HISTORY               PARM  :verbose=0                                               ASC00028
+ --  HISTORY               PARM  :clobber=no                                              ASC00029
+ --  HISTORY               TOOL  :dmappend   2016-07-24T04:22:19                          ASC00030
+ --  HISTORY               PARM  :infile=/export/proc/tmp.ascdsl3/prs_run/tmp//L3AMRF____5ASC00031
+ --  HISTORY               CONT  :85619741n351/output/acisf04544_000N021_r0009u_reg3.fits[ASC00032
+ --  HISTORY               CONT  :ECF90REG][ECF90REGU],/export/proc/tmp.ascdsl3/prs_run/tmASC00033
+ --  HISTORY               CONT  :p//L3AMRF____585619741n351/output/acisf04544_000N021_r00ASC00034
+ --  HISTORY               CONT  :09s_reg3.fits[ECF90REG][ECF90REGS],/export/proc/tmp.ascdASC00035
+ --  HISTORY               CONT  :sl3/prs_run/tmp//L3AMRF____585619741n351/output/acisf045ASC00036
+ --  HISTORY               CONT  :44_000N021_r0009m_reg3.fits[ECF90REG][ECF90REGM],/exportASC00037
+ --  HISTORY               CONT  :/proc/tmp.ascdsl3/prs_run/tmp//L3AMRF____585619741n351/oASC00038
+ --  HISTORY               CONT  :utput/acisf04544_000N021_r0009h_reg3.fits[ECF90REG][ECF9ASC00039
+ --  HISTORY               CONT  :0REGH]                                                  ASC00040
+ --  HISTORY               PARM  :outfile=/export/proc/tmp.ascdsl3/prs_run/tmp//L3AMRF____ASC00041
+ --  HISTORY               CONT  :585619741n351/output/acisf04544_000N021_r0009_reg3.fits ASC00042
+ --  HISTORY               PARM  :verbose=0                                               ASC00043
+ORIGIN               ASC                            Source of FITS file
+CREATOR              lev3_package_regfiles          tool that created this output
+ --  HISTORY               TOOL  :dmreadpar   2016-07-24T04:22:21                         ASC00825
+ --  HISTORY               PARM  :input=/export/proc/tmp.ascdsl3/prs_run/tmp//L3AMRF____58ASC00826
+ --  HISTORY               CONT  :5619741n351/output/acisf04544_000N021_r0009_hdr.par     ASC00827
+ --  HISTORY               PARM  :output=/export/proc/tmp.ascdsl3/prs_run/tmp//L3AMRF____5ASC00828
+ --  HISTORY               CONT  :85619741n351/output/acisf04544_000N021_r0009_reg3.fits[EASC00829
+ --  HISTORY               CONT  :CF90REGb]                                               ASC00830
+ --  HISTORY               PARM  :template=                                               ASC00831
+ --  HISTORY               PARM  :case=upper                                              ASC00832
+ --  HISTORY               PARM  :verbose=0                                               ASC00833
+ --  HISTORY               PARM  :clobber=yes                                             ASC00834
+HDUCLAS3             ECF90                          Region extension
+ --  HISTORY               TOOL  :dmhedit   2016-07-24T04:22:21                           ASC00835
+ --  HISTORY               PARM  :infile=/export/proc/tmp.ascdsl3/prs_run/tmp//L3AMRF____5ASC00836
+ --  HISTORY               CONT  :85619741n351/output/acisf04544_000N021_r0009_reg3.fits[EASC00837
+ --  HISTORY               CONT  :CF90REGb]                                               ASC00838
+ --  HISTORY               PARM  :filelist=none                                           ASC00839
+ --  HISTORY               PARM  :operation=add                                           ASC00840
+ --  HISTORY               PARM  :key=HDUCLAS3                                            ASC00841
+ --  HISTORY               PARM  :value=ECF90                                             ASC00842
+ --  HISTORY               PARM  :datatype=string                                         ASC00843
+ --  HISTORY               PARM  :unit=                                                   ASC00844
+ --  HISTORY               PARM  :comment=Region extension                                ASC00845
+ --  HISTORY               PARM  :verbose=0                                               ASC00846
+REGIONID             0009                           Region ID
+ --  HISTORY               TOOL  :dmhedit   2016-07-24T04:22:21                           ASC00847
+ --  HISTORY               PARM  :infile=/export/proc/tmp.ascdsl3/prs_run/tmp//L3AMRF____5ASC00848
+ --  HISTORY               CONT  :85619741n351/output/acisf04544_000N021_r0009_reg3.fits[EASC00849
+ --  HISTORY               CONT  :CF90REGb]                                               ASC00850
+ --  HISTORY               PARM  :filelist=none                                           ASC00851
+ --  HISTORY               PARM  :operation=add                                           ASC00852
+ --  HISTORY               PARM  :key=REGIONID                                            ASC00853
+ --  HISTORY               PARM  :value=0009                                              ASC00854
+ --  HISTORY               PARM  :datatype=string                                         ASC00855
+ --  HISTORY               PARM  :unit=                                                   ASC00856
+ --  HISTORY               PARM  :comment=Region ID                                       ASC00857
+ --  HISTORY               PARM  :verbose=0                                               ASC00858

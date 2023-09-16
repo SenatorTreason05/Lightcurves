@@ -1,0 +1,108 @@
+<!--Mihir Patankar [mpatankar06@gmail.com]-->
+<html>
+
+<head>
+  <title>Light Curves</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
+        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
+        sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-size: calc(10px + 2vmin);
+    }
+
+    table,
+    th,
+    td {
+      border: 1px solid;
+    }
+
+    table {
+      width: 80%;
+      margin: 0px 0px 30px 0px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 7px;
+      text-align: center;
+    }
+
+    p {
+      border: 1px dashed;
+      padding: 15px;
+    }
+
+    .table-of-contents {
+      border: 1px dashed;
+      padding: 15px;
+    }
+  </style>
+</head>
+
+
+<body>
+  <h1>Light Curve Output for {{ object_name }}</h1>
+  <p>
+    Significance Threshold: ≥{{ significance_threshold }}
+    <br />Search Radius: {{ search_radius }}
+    <br />Sources: {{ source_count }}
+  </p>
+
+
+  <div class="table-of-contents">
+    <ul>
+      <!--Sources-->
+      {% for source_name, source_data in master_data.items() %}
+      <li>
+        {{ source_name }}
+        <ul>
+          <!--Observations-->
+          {% for observation in source_data %}
+          <li>
+            <a href="#{{ source_name + '/' + observation.columns['Observation Id'] }}">
+              {{observation.columns['Observation Id'] }}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+
+  {% for source_name, source_data in master_data.items() %}
+  <tr>
+    <h2>{{ source_name }}</h2>
+  </tr>
+  {% if not source_data %}
+  <p>No data, either invalid or unsupported.</p>
+  {% endif %}
+  <table>
+    {% for observation in source_data %}
+    <tr id="{{ source_name + '/' + observation.columns['Observation Id'] }}">
+      {% for column in observation.columns.keys() %}
+      <th>{{ column }}</th>
+      {% endfor %}
+    </tr>
+    <tr>
+      {% for value in observation.columns.values() %}
+      <td>{{ value }}</td>
+      {% endfor %}
+    </tr>
+    <tr>
+      <td colspan="{{ observation.columns.keys().__len__() }}">
+        <img src="{{ observation.image_path }}" alt="Plot not found" />
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endfor %}
+</body>
+
+</html>

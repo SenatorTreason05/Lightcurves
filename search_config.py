@@ -1,12 +1,12 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 import sys
 import tkinter
-from dataclasses import dataclass
 from tkinter.ttk import Button, Checkbutton, Entry, Label, Style
-from typing import Callable
 
 import yaml
 from yaml.scanner import ScannerError
+
+from data_structures import ConfigField
 
 CONFIG_FILE_PATH = "./config.yaml"
 
@@ -42,7 +42,7 @@ class SearchConfigGUI:
             ConfigField(Label(window, text="Data Directory"), Entry(window), "./data", str),
             ConfigField(Label(window, text="Output Directory"), Entry(window), "./output", str),
             ConfigField(Label(window, text="Log Directory"), Entry(window), "./logs", str),
-            ConfigField(Label(window, text="Test Checkbox"), Checkbutton(window), True, bool),
+            ConfigField(Label(window, text="Enable Output"), Checkbutton(window), True, bool),
         ]
 
         self.populate_form_fields()
@@ -71,7 +71,7 @@ class SearchConfigGUI:
 
     def populate_form_fields(self):
         """Puts all labels and input fields onto the form, and loads the saved config data into the
-        fields where possible."""
+        fields where possible, default values when neccesary."""
         for row, config_entry in enumerate(self.config_entries):
             input_label, input_field = (config_entry.label, config_entry.field)
             input_label.grid(row=row, column=0)
@@ -112,16 +112,6 @@ class SearchConfigGUI:
             exception_info = (exception_type, exception_value, traceback)
             print("GUI context manager threw exception:", exception_info)
         self.cleanup_function()
-
-
-@dataclass(frozen=True)
-class ConfigField:
-    """Holds immutable data for a GUI configuration entry."""
-
-    label: Label
-    field: Entry | Checkbutton
-    default_value: str
-    entry_type: Callable
 
 
 def get_config():

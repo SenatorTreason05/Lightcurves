@@ -1,6 +1,5 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 import os
-import re
 import shutil
 import sys
 import threading
@@ -25,7 +24,8 @@ from pyvo import DALFormatError, dal
 from tqdm import tqdm
 
 from lightcurve import LightcurveGenerator
-from message import Message
+from data_structures import Message
+from exporter import Exporter
 
 
 class SourceManager:
@@ -82,7 +82,7 @@ class SourceManager:
             download="all",
             root=download_directory,
             bands="broad, wide",
-            filetypes="regevt, reg",
+            filetypes="regevt, reg, regimg",
             catalog="csc2",
             verbose="0",
             clobber="1",
@@ -144,9 +144,9 @@ class SourceManager:
         exported. Catches any errors and signals to main thread to stop."""
 
         lightcurve_generator = LightcurveGenerator(
-            self.config["Output Directory"],
             self.config["Binsize"],
             self.process_message_queue,
+            Exporter(self.config, len(self.sources)),
         )
         while True:
             source = self.downloaded_source_queue.get()
@@ -155,8 +155,8 @@ class SourceManager:
                 break
             self.process_message_queue.put(Message("Processing: " + source.name))
             try:
-                lightcurve_generator.process_source(source)
-            # This still meets PEP8 standards, since it's just logging and terminating ASAP.
+                lightcurve_generator.dispatch_observation_processing(source)
+            # This still satisfies PEP8, since it's outputting the error and terminating ASAP.
             # pylint: disable-next=broad-except
             except Exception:
                 exception = sys.exc_info()[1]
@@ -171,6 +171,7 @@ class SourceManager:
             self.sources_processed += 1
             time.sleep(0.1)
         self.process_message_queue.put(None)
+        lightcurve_generator.exporter.export()
 
     def download_and_process(self):
         """Manages the threads and queues that do the downloading, processing, and terminal output.
