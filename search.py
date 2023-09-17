@@ -1,4 +1,5 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
+import multiprocessing
 import os
 import shutil
 import sys
@@ -23,9 +24,9 @@ from ciao_contrib.runtool import search_csc
 from pyvo import DALFormatError, dal
 from tqdm import tqdm
 
-from lightcurve_generator import LightcurveGenerator
 from data_structures import Message
 from exporter import Exporter
+from lightcurve_generator import LightcurveGenerator
 
 
 class SourceManager:
@@ -409,7 +410,7 @@ class OutputThread(Thread):
             )
 
         self.progress_bars["total"].postfix = (
-            f"\b\b{threading.active_count()} threads, "
+            f"\b\b{len(multiprocessing.active_children())} processes, "
             f"RAM used: {psutil.Process().memory_info().rss / 1e6:.2f} MB. PID: {os.getpid()}"
         )
 
