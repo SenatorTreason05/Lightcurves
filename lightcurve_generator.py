@@ -3,8 +3,11 @@ import gzip
 import re
 from concurrent import futures
 from pathlib import Path
-from queue import Queue
+from multiprocessing import Manager, Queue
 from threading import Thread
+from time import sleep
+import time
+from data_structures import Message
 
 from lightcurve_processing import AcisProcessor, HrcProcessor
 
@@ -12,9 +15,10 @@ from lightcurve_processing import AcisProcessor, HrcProcessor
 class LightcurveGenerator:
     """Manages the generation and organization of lightcurves from a given source."""
 
-    def __init__(self, binsize, print_queue, exporter):
+    def __init__(self, binsize, print_queue, increment_sources_processed, exporter):
         self.binsize = binsize
         self.print_queue = print_queue
+        self.increment_sources_processed = increment_sources_processed
         self.exporter = exporter
 
     @staticmethod
@@ -32,53 +36,64 @@ class LightcurveGenerator:
         except gzip.BadGzipFile as error:
             raise RuntimeError(f"Could not unzip file {gzip_file.name}.") from error
 
-    def dispatch_observation_processing(self, source_directory: Path):
-        """Start the processing of an observation directory, after validating the file structure
-        seems correct."""
+    @staticmethod
+    def validate_source_directory(source_directory):
+        """Makes sure source directory is valid."""
         if not (source_directory.exists() and source_directory.is_dir()):
             raise OSError(f"Source directory {source_directory} not found.")
 
-        # Chandra soruces that end with X are TODO find out
-        if source_directory.name.endswith("X"):
-            return
+    def dispatch_source_processing(self, source_queue: Queue):
+        """Start the processing of an observation directory, after validating the file structure
+        seems correct."""
 
-        message_collection_queue = Queue()
+        message_collection_queue = Manager().Queue()
 
         def transfer_queues():
             while True:
                 new_message = message_collection_queue.get()
-                message_collection_queue.task_done()
                 if not new_message:
-                    message_collection_queue.join()
                     break
                 self.print_queue.put(new_message)
 
         transfer_thread = Thread(target=transfer_queues)
         transfer_thread.start()
 
-        observation_directories = [
-            observation_directory
-            for observation_directory in source_directory.iterdir()
-            if observation_directory.is_dir()
-        ]
         # The number of max workers is arbitrary right now.
-        with futures.ThreadPoolExecutor(max_workers=6) as executor:
-            workers = self.assign_workers(observation_directories, message_collection_queue)
-            worker_futures = [executor.submit(worker.process) for worker in workers]
-            done, not_done = futures.wait(worker_futures, return_when=futures.FIRST_EXCEPTION)
+        with futures.ProcessPoolExecutor(max_workers=8) as executor:
+            while True:
+                source_directory = source_queue.get()
+                if not source_directory:
+                    break
+                self.print_queue.put(Message("Processing: " + source_directory.name))
+                # TODO Chandra soruces that end with X are invalid, find out why
+                self.validate_source_directory(source_directory)
+                if source_directory.name.endswith("X"):
+                    return
+                observation_directories = [
+                    observation_directory
+                    for observation_directory in source_directory.iterdir()
+                    if observation_directory.is_dir()
+                ]
+                workers = self.assign_workers(observation_directories, message_collection_queue)
+                worker_futures = [executor.submit(worker.process) for worker in workers]
+                done, not_done = futures.wait(worker_futures, return_when=futures.FIRST_EXCEPTION)
+
+                results = []
+                for future in done:
+                    try:
+                        results.append(future.result())
+                    except Exception as exception:
+                        raise RuntimeError(
+                            f"Error while processing {source_directory.name}"
+                        ) from exception
+                if len(not_done) > 0:
+                    raise RuntimeError("Some observations were not processed.")
+                self.print_queue.put(Message("Done with: " + source_directory.name))
+                self.increment_sources_processed()
+                self.exporter.add_source(source_directory.name, results)
+
             message_collection_queue.put(None)
             transfer_thread.join()
-            results = []
-            for future in done:
-                try:
-                    results.append(future.result())
-                except Exception as exception:
-                    raise RuntimeError(
-                        f"Error while processing {source_directory.name}"
-                    ) from exception
-            if len(not_done) > 0:
-                raise RuntimeError("Some observations were not processed.")
-            self.exporter.add_source(source_directory.name, results)
 
     def assign_workers(self, observation_directories, message_collection_queue):
         """Map processors to observation directories."""
@@ -119,12 +134,12 @@ class LightcurveGenerator:
         return event_list, source_region
 
     @staticmethod
-    def get_instrument_processor(event_list, source_region, message_collection_queue, binsize):
+    def get_instrument_processor(event_list, source_region, message_collection, binsize):
         """Determines which instrument on Chandra the observation was obtained through: ACIS
         (Advanced CCD Imaging Spectrometer) or HRC (High Resolution Camera)"""
         acis_pattern, hrc_pattern = r"^acis", r"^hrc"
         if re.match(acis_pattern, event_list.name) and re.match(acis_pattern, source_region.name):
-            return AcisProcessor(event_list, source_region, message_collection_queue, binsize)
+            return AcisProcessor(str(event_list), str(source_region), message_collection, binsize)
         if re.match(hrc_pattern, event_list.name) and re.match(hrc_pattern, source_region.name):
-            return HrcProcessor(event_list, source_region, message_collection_queue, binsize)
+            return HrcProcessor(str(event_list), str(source_region), message_collection, binsize)
         raise RuntimeError("Unable to resolve observation instrument")

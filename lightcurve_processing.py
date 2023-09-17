@@ -1,6 +1,5 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 from io import StringIO
-import threading
 import uuid
 from abc import ABC, abstractmethod
 
@@ -21,12 +20,9 @@ matplotlib.use("svg")
 class ObservationProcessor(ABC):
     """Base class for observation processor implementations for different Chandra instruments."""
 
-    # 6 hours of debugging later... CIAO is NOT thread-safe.
-    ciao_lock = threading.Lock()
-
-    def __init__(self, event_list: Path, source_region: Path, message_collection_queue, binsize):
-        self.event_list = event_list
-        self.source_region = source_region
+    def __init__(self, event_list: str, source_region: str, message_collection_queue, binsize):
+        self.event_list = Path(event_list)
+        self.source_region = Path(source_region)
         self.message_collection_queue = message_collection_queue
         self.binsize = binsize
 
@@ -34,8 +30,7 @@ class ObservationProcessor(ABC):
         """Sequence in which all steps of the processing routine are called."""
         message_uuid = uuid.uuid4()
         with new_pfiles_environment():
-            with ObservationProcessor.ciao_lock:
-                observation_id = dmkeypar(infile=f"{self.event_list}", keyword="OBS_ID", echo=True)
+            observation_id = dmkeypar(infile=f"{self.event_list}", keyword="OBS_ID", echo=True)
             prefix = f"Observation {observation_id}: "
             isolated_event_list = self.extract_source_region()
             self.message_collection_queue.put(Message(f"{prefix}Isolated...", message_uuid))
@@ -64,23 +59,21 @@ class ObservationProcessor(ABC):
 
     def extract_source_region(self):
         """Extracts the region of the event list that matches the source region we care about."""
-        with ObservationProcessor.ciao_lock:
-            dmcopy(
-                infile=f"{self.event_list}[sky=region({self.source_region})]",
-                outfile=(outfile := f"{self.event_list}.src"),
-            )
+        dmcopy(
+            infile=f"{self.event_list}[sky=region({self.source_region})]",
+            outfile=(outfile := f"{self.event_list}.src"),
+        )
         return Path(outfile)
 
     def get_observation_details(self):
         """Gets keys from the header block detailing the observation information."""
-        with ObservationProcessor.ciao_lock:
-            return ObservationHeaderInfo(
-                instrument=dmkeypar(infile=f"{self.event_list}", keyword="INSTRUME", echo=True),
-                observation_id=dmkeypar(infile=f"{self.event_list}", keyword="OBS_ID", echo=True),
-                region_id=dmkeypar(infile=f"{self.event_list}", keyword="REGIONID", echo=True),
-                start_time=dmkeypar(infile=f"{self.event_list}", keyword="DATE-OBS", echo=True),
-                end_time=dmkeypar(infile=f"{self.event_list}", keyword="DATE-END", echo=True),
-            )
+        return ObservationHeaderInfo(
+            instrument=dmkeypar(infile=f"{self.event_list}", keyword="INSTRUME", echo=True),
+            observation_id=dmkeypar(infile=f"{self.event_list}", keyword="OBS_ID", echo=True),
+            region_id=dmkeypar(infile=f"{self.event_list}", keyword="REGIONID", echo=True),
+            start_time=dmkeypar(infile=f"{self.event_list}", keyword="DATE-OBS", echo=True),
+            end_time=dmkeypar(infile=f"{self.event_list}", keyword="DATE-END", echo=True),
+        )
 
 
 class AcisProcessor(ObservationProcessor):
@@ -105,13 +98,12 @@ class AcisProcessor(ObservationProcessor):
     def extract_lightcurves(event_list, binsize):
         outfiles = []
         for light_level, energy_range in AcisProcessor.ENERGY_LEVELS.items():
-            with ObservationProcessor.ciao_lock:
-                dmextract(
-                    infile=f"{event_list}[{energy_range}][bin time=::"
-                    f"{AcisProcessor.adjust_binsize(event_list, binsize)}]",
-                    outfile=(outfile := f"{event_list}.{light_level}.lc"),
-                    opt="ltc1",
-                )
+            dmextract(
+                infile=f"{event_list}[{energy_range}][bin time=::"
+                f"{AcisProcessor.adjust_binsize(event_list, binsize)}]",
+                outfile=(outfile := f"{event_list}.{light_level}.lc"),
+                opt="ltc1",
+            )
             outfiles.append(Path(outfile))
         return outfiles
 
@@ -119,13 +111,12 @@ class AcisProcessor(ObservationProcessor):
     def filter_lightcurves(lightcurves):
         outfiles = []
         for lightcurve in lightcurves:
-            with ObservationProcessor.ciao_lock:
-                dmlist(
-                    infile=f"{lightcurve}"
-                    f"[cols time,count_rate,count_rate_err,counts,exposure,area]",
-                    opt="data,clean",
-                    outfile=(outfile := f"{lightcurve}.ascii"),
-                )
+            dmlist(
+                infile=f"{lightcurve}"
+                f"[cols time,count_rate,count_rate_err,counts,exposure,area]",
+                opt="data,clean",
+                outfile=(outfile := f"{lightcurve}.ascii"),
+            )
             outfiles.append(Path(outfile))
         return outfiles
 

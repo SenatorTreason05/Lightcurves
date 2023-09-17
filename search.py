@@ -23,7 +23,7 @@ from ciao_contrib.runtool import search_csc
 from pyvo import DALFormatError, dal
 from tqdm import tqdm
 
-from lightcurve import LightcurveGenerator
+from lightcurve_generator import LightcurveGenerator
 from data_structures import Message
 from exporter import Exporter
 
@@ -82,7 +82,7 @@ class SourceManager:
             download="all",
             root=download_directory,
             bands="broad, wide",
-            filetypes="regevt, reg, regimg",
+            filetypes="regevt, reg",
             catalog="csc2",
             verbose="0",
             clobber="1",
@@ -140,36 +140,29 @@ class SourceManager:
         self.download_message_queue.put(None)
 
     def process(self, process_error_event):
-        """Feeds downloaded sources to the class where they will be processed, plotted, and
-        exported. Catches any errors and signals to main thread to stop."""
+        """Setup and use lightcurve generator class."""
+
+        def increment_sources_processed():
+            self.sources_processed += 1
 
         lightcurve_generator = LightcurveGenerator(
             self.config["Binsize"],
             self.process_message_queue,
+            increment_sources_processed,
             Exporter(self.config, len(self.sources)),
         )
-        while True:
-            source = self.downloaded_source_queue.get()
-            if source is None:
-                self.downloaded_source_queue.task_done()
-                break
-            self.process_message_queue.put(Message("Processing: " + source.name))
-            try:
-                lightcurve_generator.dispatch_observation_processing(source)
-            # This still satisfies PEP8, since it's outputting the error and terminating ASAP.
-            # pylint: disable-next=broad-except
-            except Exception:
-                exception = sys.exc_info()[1]
-                exception_traceback = traceback.format_exc().replace("\n", " ")
-                self.process_message_queue.put(Message(f"{exception} - {exception_traceback}"))
-                self.process_message_queue.put(None)
-                self.download_message_queue.put(None)
-                process_error_event.set()
-                raise
-            self.process_message_queue.put(Message("Done with: " + source.name))
-            self.downloaded_source_queue.task_done()
-            self.sources_processed += 1
-            time.sleep(0.1)
+        try:
+            lightcurve_generator.dispatch_source_processing(self.downloaded_source_queue)
+        # This still satisfies PEP8, since it's outputting the error and terminating ASAP.
+        # pylint: disable-next=broad-except
+        except Exception:
+            exception = sys.exc_info()[1]
+            exception_traceback = traceback.format_exc().replace("\n", " ")
+            self.process_message_queue.put(Message(f"{exception} - {exception_traceback}"))
+            self.process_message_queue.put(None)
+            self.download_message_queue.put(None)
+            process_error_event.set()
+            raise
         self.process_message_queue.put(None)
         lightcurve_generator.exporter.export()
 
@@ -196,7 +189,6 @@ class SourceManager:
             output_thread.join()
             sys.exit(1)
         download_thread.join()
-        self.downloaded_source_queue.join()
         if outputting:
             self.download_message_queue.join()
             self.process_message_queue.join()
