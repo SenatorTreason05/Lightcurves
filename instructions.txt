@@ -1,4 +1,0 @@
-Run main.py in a conda environment with ciao and the other dependencies.
-Follow the prompts, contact if there are issues.
-
-python3.10 main.py

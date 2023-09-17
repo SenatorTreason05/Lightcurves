@@ -64,7 +64,7 @@ class Exporter:
         """Write all master data contents to an HTML file."""
         with open(self.output_directory / "index.html", mode="a", encoding="utf-8") as file:
             environment = Environment(loader=FileSystemLoader("./"))
-            template = environment.get_template(str("/source.jinja"))
+            template = environment.get_template(str("/output_template.jinja"))
             content = template.render(
                 source_count=self.source_count,
                 object_name=self.config["Object Name"],
