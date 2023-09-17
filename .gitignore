@@ -161,6 +161,8 @@ cython_debug/
 
 .DS_Store
 data/
+logs/
 output/
+old_program/
 *.tsv
 config.yaml
