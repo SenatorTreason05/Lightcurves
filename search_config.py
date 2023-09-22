@@ -38,6 +38,7 @@ class SearchConfigGUI:
             ConfigField(Label(window, text="Object Name"), Entry(window), "", str),
             ConfigField(Label(window, text="Search Radius (arcmin)"), Entry(window), "2", float),
             ConfigField(Label(window, text="Significance Threshold"), Entry(window), "50", float),
+            ConfigField(Label(window, text="Minimum Counts"), Entry(window), "100", int),
             ConfigField(Label(window, text="Binsize"), Entry(window), "500", float),
             ConfigField(Label(window, text="Data Directory"), Entry(window), "./data", str),
             ConfigField(Label(window, text="Output Directory"), Entry(window), "./output", str),

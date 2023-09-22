@@ -20,11 +20,12 @@ matplotlib.use("svg")
 class ObservationProcessor(ABC):
     """Base class for observation processor implementations for different Chandra instruments."""
 
-    def __init__(self, event_list: str, source_region: str, message_collection_queue, binsize):
+    def __init__(self, event_list: str, source_region: str, message_collection_queue, config):
         self.event_list = Path(event_list)
         self.source_region = Path(source_region)
         self.message_collection_queue = message_collection_queue
-        self.binsize = binsize
+        self.binsize = config["Binsize"]
+        self.minimum_counts = config["Minimum Counts"]
 
     def process(self):
         """Sequence in which all steps of the processing routine are called."""
@@ -130,10 +131,11 @@ class AcisProcessor(ObservationProcessor):
             lightcurve_data[energy_level] = lightcurve_dataframe[
                 lightcurve_dataframe["EXPOSURE"] != 0
             ]
+        # The type casts are important as the data is returned as NumPy data types by CIAO.
         observation_data = ObservationData(
-            average_count_rate=round(lightcurve_data["broad"]["COUNT_RATE"].mean(), 3),
-            total_counts=lightcurve_data["broad"]["COUNTS"].sum(),
-            total_exposure_time=round(lightcurve_data["broad"]["EXPOSURE"].sum(), 3),
+            average_count_rate=float(round(lightcurve_data["broad"]["COUNT_RATE"].mean(), 3)),
+            total_counts=int(lightcurve_data["broad"]["COUNTS"].sum()),
+            total_exposure_time=float(round(lightcurve_data["broad"]["EXPOSURE"].sum(), 3)),
             raw_start_time=int(lightcurve_data["broad"]["TIME"].min()),
         )
         return LightcurveParseResults(

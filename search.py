@@ -147,7 +147,7 @@ class SourceManager:
             self.sources_processed += 1
 
         lightcurve_generator = LightcurveGenerator(
-            self.config["Binsize"],
+            self.config,
             self.process_message_queue,
             increment_sources_processed,
             Exporter(self.config, len(self.sources)),

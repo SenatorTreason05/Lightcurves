@@ -3,11 +3,9 @@ import gzip
 import re
 from concurrent import futures
 from pathlib import Path
-from multiprocessing import Manager, Queue
+import multiprocessing
 from threading import Thread
-from time import sleep
-import time
-from data_structures import Message
+from data_structures import LightcurveParseResults, Message
 
 from lightcurve_processing import AcisProcessor, HrcProcessor
 
@@ -15,10 +13,10 @@ from lightcurve_processing import AcisProcessor, HrcProcessor
 class LightcurveGenerator:
     """Manages the generation and organization of lightcurves from a given source."""
 
-    def __init__(self, binsize, print_queue, increment_sources_processed, exporter):
-        self.binsize = binsize
+    def __init__(self, program_config, print_queue, increment_sources_processed_function, exporter):
+        self.config = program_config
         self.print_queue = print_queue
-        self.increment_sources_processed = increment_sources_processed
+        self.increment_sources_processed = increment_sources_processed_function
         self.exporter = exporter
 
     @staticmethod
@@ -42,11 +40,11 @@ class LightcurveGenerator:
         if not (source_directory.exists() and source_directory.is_dir()):
             raise OSError(f"Source directory {source_directory} not found.")
 
-    def dispatch_source_processing(self, source_queue: Queue):
+    def dispatch_source_processing(self, source_queue):
         """Start the processing of an observation directory, after validating the file structure
         seems correct."""
 
-        message_collection_queue = Manager().Queue()
+        message_collection_queue = multiprocessing.Manager().Queue()
 
         def transfer_queues():
             while True:
@@ -59,7 +57,8 @@ class LightcurveGenerator:
         transfer_thread.start()
 
         # The number of max workers is arbitrary right now.
-        with futures.ProcessPoolExecutor(max_workers=8) as executor:
+        # NOTE that it is limited by your CPU. For example, My Apple M2 is limited to 14 processes.
+        with futures.ProcessPoolExecutor(max_workers=26) as executor:
             while True:
                 source_directory = source_queue.get()
                 if not source_directory:
@@ -68,7 +67,8 @@ class LightcurveGenerator:
                 # TODO Chandra soruces that end with X are invalid, find out why
                 self.validate_source_directory(source_directory)
                 if source_directory.name.endswith("X"):
-                    return
+                    self.increment_sources_processed()
+                    continue
                 observation_directories = [
                     observation_directory
                     for observation_directory in source_directory.iterdir()
@@ -90,10 +90,21 @@ class LightcurveGenerator:
                     raise RuntimeError("Some observations were not processed.")
                 self.print_queue.put(Message("Done with: " + source_directory.name))
                 self.increment_sources_processed()
+                if self.get_maximum_counts_in_source(results) < self.config["Minimum Counts"]:
+                    continue
                 self.exporter.add_source(source_directory.name, results)
 
             message_collection_queue.put(None)
             transfer_thread.join()
+
+    @staticmethod
+    def get_maximum_counts_in_source(source_processing_results: list[LightcurveParseResults]):
+        """Makes sure that at least one observation in the source meets the user specified total
+        counts threshold"""
+        return max(
+            source_processing_results,
+            key=lambda observation: observation.observation_data.total_counts,
+        ).observation_data.total_counts
 
     def assign_workers(self, observation_directories, message_collection_queue):
         """Map processors to observation directories."""
@@ -101,7 +112,7 @@ class LightcurveGenerator:
             self.get_instrument_processor(
                 *self.get_observation_files(observation_directory),
                 message_collection_queue,
-                self.binsize,
+                self.config,
             )
             for observation_directory in observation_directories
         ]
@@ -134,12 +145,12 @@ class LightcurveGenerator:
         return event_list, source_region
 
     @staticmethod
-    def get_instrument_processor(event_list, source_region, message_collection, binsize):
+    def get_instrument_processor(event_list, source_region, message_collection, config):
         """Determines which instrument on Chandra the observation was obtained through: ACIS
         (Advanced CCD Imaging Spectrometer) or HRC (High Resolution Camera)"""
         acis_pattern, hrc_pattern = r"^acis", r"^hrc"
         if re.match(acis_pattern, event_list.name) and re.match(acis_pattern, source_region.name):
-            return AcisProcessor(str(event_list), str(source_region), message_collection, binsize)
+            return AcisProcessor(str(event_list), str(source_region), message_collection, config)
         if re.match(hrc_pattern, event_list.name) and re.match(hrc_pattern, source_region.name):
-            return HrcProcessor(str(event_list), str(source_region), message_collection, binsize)
+            return HrcProcessor(str(event_list), str(source_region), message_collection, config)
         raise RuntimeError("Unable to resolve observation instrument")

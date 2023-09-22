@@ -70,6 +70,7 @@ class Exporter:
                 object_name=self.config["Object Name"],
                 search_radius=self.config["Search Radius (arcmin)"],
                 significance_threshold=self.config["Significance Threshold"],
+                counts_threshold = self.config["Minimum Counts"],
                 master_data=self.master_data,
             )
             file.write(content)

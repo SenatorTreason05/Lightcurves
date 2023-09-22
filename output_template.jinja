@@ -38,8 +38,27 @@
     }
 
     .table-of-contents {
+      font-size: 2vmin;
       border: 1px dashed;
       padding: 15px;
+    }
+
+    .table-of-contents li {
+      break-inside: avoid;
+    }
+
+    .table-of-contents .source-list {
+      column-count: 4;
+      column-gap: 2em;
+      list-style: none;
+    }
+
+    .source-list .observation-list {
+      list-style: decimal-leading-zero;
+    }
+
+    .source-list>li {
+      padding-bottom: 10px;
     }
   </style>
 </head>
@@ -49,18 +68,19 @@
   <h1>Light Curve Output for {{ object_name }}</h1>
   <p>
     Significance Threshold: ≥{{ significance_threshold }}
+    <br /> Counts Threshold: ≥{{ significance_threshold }}
     <br />Search Radius: {{ search_radius }}
     <br />Sources: {{ source_count }}
   </p>
 
 
   <div class="table-of-contents">
-    <ul>
+    <ul class="source-list">
       <!--Sources-->
       {% for source_name, source_data in master_data.items() %}
       <li>
         {{ source_name }}
-        <ul>
+        <ul class="observation-list">
           <!--Observations-->
           {% for observation in source_data %}
           <li>
@@ -97,7 +117,7 @@
     </tr>
     <tr>
       <td colspan="{{ observation.columns.keys().__len__() }}">
-        <img src="{{ observation.image_path }}" alt="Plot not found" />
+        <img src="{{ observation.image_path }}" alt="Plot not found" loading="lazy" />
       </td>
     </tr>
     {% endfor %}
