@@ -28,6 +28,8 @@ class Exporter:
             observations, key=lambda observation: observation.observation_data.raw_start_time
         )
         for observation in sorted_observations:
+            plot_directory = self.output_directory / "plots" / source_name
+            plot_directory.mkdir(parents=True, exist_ok=True)
             observation_id = observation.observation_header_info.observation_id
             combined_observation_data = {
                 **observation.observation_header_info._asdict(),
@@ -39,19 +41,39 @@ class Exporter:
                         self.format_table_header(key): value
                         for key, value in combined_observation_data.items()
                     },
-                    image_path=self.write_svg(source_name, observation_id, observation.svg_data),
+                    plot_image_path=self.write_plot_image(
+                        plot_directory,
+                        observation_id,
+                        observation.plot_svg_data,
+                        observation.plot_csv_data,
+                    ),
+                    postage_stamp_image_path=self.write_postage_stamp(
+                        plot_directory, observation_id, observation.postagestamp_png_data
+                    ),
                 )
             )
         self.master_data[source_name] = source_data
 
-    def write_svg(self, source_name, observation_id, svg_data):
-        """Write the plot image to disk and remove it from memory."""
-        svg_directory: Path = self.output_directory / "plots" / source_name
-        svg_directory.mkdir(parents=True, exist_ok=True)
-        file_path = svg_directory / f"{observation_id}.svg"
-        with open(file_path, mode="w+", encoding="utf-8") as file:
+    def write_plot_image(self, plot_directory, observation_id, svg_data, csv_data):
+        """Write the plot svg image to disk and remove it from memory."""
+        plot_image_path = plot_directory / f"{observation_id}.svg"
+        plot_data_path = plot_directory / f"{observation_id}.csv"
+        with open(plot_image_path, mode="w+", encoding="utf-8") as file:
             file.write(svg_data.getvalue())
             svg_data.close()
+        with open(plot_data_path, mode="w+", encoding="utf-8") as file:
+            file.write(csv_data.getvalue())
+            csv_data.close()
+        return f"./{plot_image_path.relative_to(self.output_directory)}"
+
+    def write_postage_stamp(self, plot_directory, observation_id, png_data):
+        """Write the postage stamp png image to disk and remove it from memory."""
+        if not png_data:
+            return ""
+        file_path = plot_directory / f"{observation_id}.png"
+        with open(file_path, mode="wb+") as file:
+            file.write(png_data.getvalue())
+            png_data.close()
         return f"./{file_path.relative_to(self.output_directory)}"
 
     @staticmethod
@@ -70,7 +92,7 @@ class Exporter:
                 object_name=self.config["Object Name"],
                 search_radius=self.config["Search Radius (arcmin)"],
                 significance_threshold=self.config["Significance Threshold"],
-                counts_threshold = self.config["Minimum Counts"],
+                counts_threshold=self.config["Minimum Counts"],
                 master_data=self.master_data,
             )
             file.write(content)

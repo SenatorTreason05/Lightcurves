@@ -1,10 +1,10 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
-from io import StringIO
+from io import BytesIO, StringIO
 import uuid
 from abc import ABC, abstractmethod
 
 from pathlib import Path
-from astropy.table import Table
+from astropy import visualization, table, io
 
 # pylint: disable-next=no-name-in-module
 from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, new_pfiles_environment
@@ -14,15 +14,14 @@ from matplotlib import pyplot
 
 from data_structures import LightcurveParseResults, Message, ObservationData, ObservationHeaderInfo
 
-matplotlib.use("svg")
-
 
 class ObservationProcessor(ABC):
     """Base class for observation processor implementations for different Chandra instruments."""
 
-    def __init__(self, event_list: str, source_region: str, message_collection_queue, config):
-        self.event_list = Path(event_list)
-        self.source_region = Path(source_region)
+    def __init__(self, data_products, message_collection_queue, config):
+        self.event_list = Path(data_products.event_list_file)
+        self.source_region = Path(data_products.source_region_file)
+        self.source_image = Path(data_products.region_image_file) if config["Plot Image"] else None
         self.message_collection_queue = message_collection_queue
         self.binsize = config["Binsize"]
         self.minimum_counts = config["Minimum Counts"]
@@ -123,7 +122,7 @@ class AcisProcessor(ObservationProcessor):
 
     def parse(self, lightcurves):
         lightcurve_data: dict[str, DataFrame] = {
-            energy_level: Table.read(lightcurve, format="ascii").to_pandas()
+            energy_level: table.Table.read(lightcurve, format="ascii").to_pandas()
             for energy_level, lightcurve in zip(AcisProcessor.ENERGY_LEVELS.keys(), lightcurves)
         }
         # Trim zero exposure points
@@ -138,15 +137,23 @@ class AcisProcessor(ObservationProcessor):
             total_exposure_time=float(round(lightcurve_data["broad"]["EXPOSURE"].sum(), 3)),
             raw_start_time=int(lightcurve_data["broad"]["TIME"].min()),
         )
+        output_plot_data = StringIO(
+            lightcurve_data["broad"][["TIME", "COUNT_RATE", "COUNT_RATE_ERR"]].to_csv()
+        )
         return LightcurveParseResults(
             observation_header_info=self.get_observation_details(),
             observation_data=observation_data,
-            svg_data=self.plot(lightcurve_data),
+            plot_csv_data=output_plot_data,
+            plot_svg_data=self.plot(lightcurve_data),
+            postagestamp_png_data=self.plot_postagestamp(self.source_image)
+            if self.source_image
+            else None,
         )
 
     @staticmethod
     def plot(lightcurve_data: dict[str, DataFrame]):
         """Generate a pyplot plot to model the lightcurves."""
+        matplotlib.use("svg")
         initial_time = lightcurve_data["broad"]["TIME"].min()
         zero_shifted_time_kiloseconds = (lightcurve_data["broad"]["TIME"] - initial_time) / 1000
         observation_duration = zero_shifted_time_kiloseconds.max()
@@ -188,6 +195,19 @@ class AcisProcessor(ObservationProcessor):
         pyplot.savefig(svg_data := StringIO(), bbox_inches="tight")
         pyplot.close(figure)
         return svg_data
+
+    @staticmethod
+    def plot_postagestamp(source_image_file):
+        """Plots a binned image representing photon position data restricted to the source region"""
+        matplotlib.use("agg")
+        pyplot.style.use(visualization.astropy_mpl_style)
+        image_data = io.fits.getdata(source_image_file, ext=0)
+        figure = pyplot.figure()
+        plot = figure.add_subplot(111)
+        plot.imshow(image_data, cmap="gray")
+        pyplot.savefig(png_data := BytesIO(), bbox_inches="tight")
+        pyplot.close(figure)
+        return png_data
 
 
 class HrcProcessor(ObservationProcessor):

@@ -60,6 +60,11 @@
     .source-list>li {
       padding-bottom: 10px;
     }
+
+    .postage-stamp-image {
+      max-width: 150px;
+      max-height: 150px;
+    }
   </style>
 </head>
 
@@ -115,9 +120,16 @@
       <td>{{ value }}</td>
       {% endfor %}
     </tr>
+    {% set full_colspan = observation.columns.keys().__len__() %}
     <tr>
-      <td colspan="{{ observation.columns.keys().__len__() }}">
-        <img src="{{ observation.image_path }}" alt="Plot not found" loading="lazy" />
+      <td colspan="{{ full_colspan }}">
+        <img src="{{ observation.plot_image_path }}" alt="Image not found" loading="lazy" />
+      </td>
+    </tr>
+    <tr>
+      <td colspan="{{ full_colspan }}">
+        <img class="postage-stamp-image" src="{{ observation.postage_stamp_image_path }}" alt="Image not found"
+          loading="lazy" />
       </td>
     </tr>
     {% endfor %}

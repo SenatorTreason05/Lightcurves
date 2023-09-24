@@ -5,7 +5,7 @@ from concurrent import futures
 from pathlib import Path
 import multiprocessing
 from threading import Thread
-from data_structures import LightcurveParseResults, Message
+from data_structures import DataProducts, LightcurveParseResults, Message
 
 from lightcurve_processing import AcisProcessor, HrcProcessor
 
@@ -56,8 +56,7 @@ class LightcurveGenerator:
         transfer_thread = Thread(target=transfer_queues)
         transfer_thread.start()
 
-        # The number of max workers is arbitrary right now.
-        # NOTE that it is limited by your CPU. For example, My Apple M2 is limited to 14 processes.
+        # The number of max workers is arbitrary right now. NOTE that it is limited by your CPU
         with futures.ProcessPoolExecutor(max_workers=26) as executor:
             while True:
                 source_directory = source_queue.get()
@@ -110,7 +109,7 @@ class LightcurveGenerator:
         """Map processors to observation directories."""
         aa = [
             self.get_instrument_processor(
-                *self.get_observation_files(observation_directory),
+                self.get_observation_files(observation_directory),
                 message_collection_queue,
                 self.config,
             )
@@ -125,32 +124,28 @@ class LightcurveGenerator:
 
     @staticmethod
     def get_observation_files(observation_directory: Path):
-        """Verify and return the observation data product files."""
+        """Return the observation data product files."""
         LightcurveGenerator.unzip_fits_files(observation_directory)
-        valid_contents = tuple(
-            data_product
-            for data_product in observation_directory.iterdir()
-            if data_product.suffix == ".fits"
-        )
-        if len(valid_contents) != 2:
-            raise OSError("Observation contents are invalid.")
-        event_list, source_region = None, None
-        for data_product in valid_contents:
-            if data_product.stem.endswith("regevt3"):
-                event_list = data_product
-            elif data_product.stem.endswith("reg3"):
-                source_region = data_product
-        if not event_list or not source_region:
-            raise OSError("Missing data products.")
-        return event_list, source_region
+        event_list_file, source_region_file, region_image_file = None, None, None
+        for data_product_file in observation_directory.glob("*.fits"):
+            stem = data_product_file.stem.lower()
+            if stem.endswith("regevt3"):
+                event_list_file = data_product_file
+            elif stem.endswith("reg3"):
+                source_region_file = data_product_file
+            elif stem.endswith("regimg3"):
+                region_image_file = data_product_file
+        if not event_list_file or not source_region_file:
+            raise OSError("Missing neccesary data products.")
+        return DataProducts(event_list_file, source_region_file, region_image_file)
 
     @staticmethod
-    def get_instrument_processor(event_list, source_region, message_collection, config):
+    def get_instrument_processor(data_products: DataProducts, message_collection, config):
         """Determines which instrument on Chandra the observation was obtained through: ACIS
         (Advanced CCD Imaging Spectrometer) or HRC (High Resolution Camera)"""
         acis_pattern, hrc_pattern = r"^acis", r"^hrc"
-        if re.match(acis_pattern, event_list.name) and re.match(acis_pattern, source_region.name):
-            return AcisProcessor(str(event_list), str(source_region), message_collection, config)
-        if re.match(hrc_pattern, event_list.name) and re.match(hrc_pattern, source_region.name):
-            return HrcProcessor(str(event_list), str(source_region), message_collection, config)
+        if re.match(acis_pattern, data_products.event_list_file.name):
+            return AcisProcessor(data_products, message_collection, config)
+        if re.match(hrc_pattern, data_products.event_list_file.name):
+            return HrcProcessor(data_products, message_collection, config)
         raise RuntimeError("Unable to resolve observation instrument")

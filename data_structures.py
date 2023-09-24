@@ -1,5 +1,6 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
-from io import StringIO
+from io import BytesIO, StringIO
+from pathlib import Path
 from tkinter.ttk import Checkbutton, Entry, Label
 from typing import Callable, NamedTuple
 from uuid import UUID
@@ -20,6 +21,20 @@ class Message(NamedTuple):
 
     content: str
     uuid: UUID = None
+
+
+class DataProducts(NamedTuple):
+    """Holds file paths for data products."""
+
+    event_list_file: Path = None
+    source_region_file: Path = None
+    region_image_file: Path = None
+
+    def __reduce__(self):
+        return (
+            self.__class__,
+            (str(self.event_list_file), str(self.source_region_file), str(self.region_image_file)),
+        )
 
 
 class ObservationHeaderInfo(NamedTuple):
@@ -47,11 +62,14 @@ class LightcurveParseResults(NamedTuple):
 
     observation_header_info: ObservationHeaderInfo
     observation_data: ObservationData
-    svg_data: StringIO
+    plot_csv_data: StringIO
+    plot_svg_data: StringIO
+    postagestamp_png_data: BytesIO
+
 
 class ExportableObservationData(NamedTuple):
     """Combines all observation data into the form that will be sent to the templating engine."""
 
     columns: dict
-    image_path: str
-    
+    plot_image_path: str
+    postage_stamp_image_path: str
