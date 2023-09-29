@@ -5,7 +5,7 @@ from concurrent import futures
 from pathlib import Path
 import multiprocessing
 from threading import Thread
-from data_structures import DataProducts, LightcurveParseResults, Message
+from data_structures import LightcurveParseResults, Message
 
 from lightcurve_processing import AcisProcessor, HrcProcessor
 
@@ -56,15 +56,14 @@ class LightcurveGenerator:
         transfer_thread = Thread(target=transfer_queues)
         transfer_thread.start()
 
-        # The number of max workers is arbitrary right now. NOTE that it is limited by your CPU
-        with futures.ProcessPoolExecutor(max_workers=26) as executor:
+        with futures.ProcessPoolExecutor() as executor:
             while True:
                 source_directory = source_queue.get()
                 if not source_directory:
                     break
                 self.print_queue.put(Message("Processing: " + source_directory.name))
-                # TODO Chandra soruces that end with X are invalid, find out why
                 self.validate_source_directory(source_directory)
+                # Sources ending in X are "extended sources." They can be ignored.
                 if source_directory.name.endswith("X"):
                     self.increment_sources_processed()
                     continue
@@ -107,7 +106,7 @@ class LightcurveGenerator:
 
     def assign_workers(self, observation_directories, message_collection_queue):
         """Map processors to observation directories."""
-        aa = [
+        __ = [
             self.get_instrument_processor(
                 self.get_observation_files(observation_directory),
                 message_collection_queue,
@@ -117,35 +116,30 @@ class LightcurveGenerator:
         ]
 
         # Temp code!
-        for a in aa:
-            if isinstance(a, HrcProcessor):
-                aa.remove(a)
-        return aa
+        for _ in __:
+            if isinstance(_, HrcProcessor):
+                __.remove(_)
+        return __
 
     @staticmethod
     def get_observation_files(observation_directory: Path):
         """Return the observation data product files."""
         LightcurveGenerator.unzip_fits_files(observation_directory)
-        event_list_file, source_region_file, region_image_file = None, None, None
         for data_product_file in observation_directory.glob("*.fits"):
             stem = data_product_file.stem.lower()
             if stem.endswith("regevt3"):
                 event_list_file = data_product_file
-            elif stem.endswith("reg3"):
-                source_region_file = data_product_file
-            elif stem.endswith("regimg3"):
-                region_image_file = data_product_file
-        if not event_list_file or not source_region_file:
-            raise OSError("Missing neccesary data products.")
-        return DataProducts(event_list_file, source_region_file, region_image_file)
+            if not event_list_file:
+                raise OSError("Event file missing.")
+        return event_list_file
 
     @staticmethod
-    def get_instrument_processor(data_products: DataProducts, message_collection, config):
+    def get_instrument_processor(event_list_file, message_collection, config):
         """Determines which instrument on Chandra the observation was obtained through: ACIS
         (Advanced CCD Imaging Spectrometer) or HRC (High Resolution Camera)"""
         acis_pattern, hrc_pattern = r"^acis", r"^hrc"
-        if re.match(acis_pattern, data_products.event_list_file.name):
-            return AcisProcessor(data_products, message_collection, config)
-        if re.match(hrc_pattern, data_products.event_list_file.name):
-            return HrcProcessor(data_products, message_collection, config)
+        if re.match(acis_pattern, event_list_file.name):
+            return AcisProcessor(event_list_file, message_collection, config)
+        if re.match(hrc_pattern, event_list_file.event_list_file.name):
+            return HrcProcessor(event_list_file, message_collection, config)
         raise RuntimeError("Unable to resolve observation instrument")

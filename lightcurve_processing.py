@@ -1,45 +1,52 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
-from io import BytesIO, StringIO
 import uuid
 from abc import ABC, abstractmethod
-
+from collections import namedtuple
+from io import StringIO
 from pathlib import Path
-from astropy import visualization, table, io
+
+import matplotlib
+from astropy import io, table
 
 # pylint: disable-next=no-name-in-module
-from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, new_pfiles_environment
-from pandas import DataFrame
-import matplotlib
+from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, new_pfiles_environment
 from matplotlib import pyplot
-
+from pandas import DataFrame
+import postage_stamp_plotter
 from data_structures import LightcurveParseResults, Message, ObservationData, ObservationHeaderInfo
 
 
 class ObservationProcessor(ABC):
     """Base class for observation processor implementations for different Chandra instruments."""
 
-    def __init__(self, data_products, message_collection_queue, config):
-        self.event_list = Path(data_products.event_list_file)
-        self.source_region = Path(data_products.source_region_file)
-        self.source_image = Path(data_products.region_image_file) if config["Plot Image"] else None
+    def __init__(self, event_list_file, message_collection_queue, config):
+        self.event_list = Path(event_list_file)
+        self.detector_coords_image, self.sky_coords_image = None, None
         self.message_collection_queue = message_collection_queue
         self.binsize = config["Binsize"]
         self.minimum_counts = config["Minimum Counts"]
 
     def process(self):
         """Sequence in which all steps of the processing routine are called."""
+
         message_uuid = uuid.uuid4()
         with new_pfiles_environment():
             observation_id = dmkeypar(infile=f"{self.event_list}", keyword="OBS_ID", echo=True)
             prefix = f"Observation {observation_id}: "
-            isolated_event_list = self.extract_source_region()
-            self.message_collection_queue.put(Message(f"{prefix}Isolated...", message_uuid))
-            lightcurves = self.extract_lightcurves(isolated_event_list, self.binsize)
-            self.message_collection_queue.put(Message(f"{prefix}Extracted...", message_uuid))
-            filtered_lightcurves = self.filter_lightcurves(lightcurves)
-            self.message_collection_queue.put(Message(f"{prefix}Filtered...", message_uuid))
-            parse_results = self.parse(filtered_lightcurves)
-            self.message_collection_queue.put(Message(f"{prefix}Parsed... Done.", message_uuid))
+
+            def status(status):
+                self.message_collection_queue.put(Message(f"{prefix}{status}", message_uuid))
+
+            status("Retrieving images...")
+            self.get_images()
+            status("Extracting lightcurves...")
+            lightcurves = self.extract_lightcurves(self.event_list, self.binsize)
+            status("Exporting columns...")
+            filtered_lightcurves = self.export_lightcurve_columns(lightcurves)
+            status("Plotting lightcurves...")
+            parse_results = self.plot(filtered_lightcurves)
+            status("Plotting lightcurves... Done")
+
         return parse_results
 
     @staticmethod
@@ -50,20 +57,48 @@ class ObservationProcessor(ABC):
 
     @staticmethod
     @abstractmethod
-    def filter_lightcurves(lightcurves: list[Path]):
+    def export_lightcurve_columns(lightcurves: list[Path]):
         """Filter lightcurve(s) to get the columns we care about and format them."""
 
     @abstractmethod
-    def parse(self, lightcurves: list[Path]) -> LightcurveParseResults:
+    def plot(self, lightcurves: list[Path]) -> LightcurveParseResults:
         """Parse lightcurve(s). Returns what will then be returned by the thread pool future."""
 
-    def extract_source_region(self):
-        """Extracts the region of the event list that matches the source region we care about."""
+    def get_images(self):
+        """Gets the images from the event list, one in sky coordinates, the other in detector
+        coordinates. This is useful to be able to track if a lightcurve dip corresponds with a
+        source going over the edge of the detector. The image is cropped otherwise we would be
+        dealing with hundreds of thousands of blank pixels. The cropping bounds are written to the
+        FITS file for later use in plotting."""
+        CropBounds = namedtuple("CropBounds", ["x_min", "y_min", "x_max", "y_max"])
+
+        def convert_bounds_object_to_hdu(bounds):
+            hdu = io.fits.table_to_hdu(
+                table.Table({field: [(getattr(bounds, field))] for field in bounds._fields})
+            )
+            hdu.header["EXTNAME"] = "BOUNDS"
+            return hdu
+
+        dmstat(infile=f"{self.event_list}[cols x,y]")
+        sky_bounds = CropBounds(*dmstat.out_min.split(","), *dmstat.out_max.split(","))
         dmcopy(
-            infile=f"{self.event_list}[sky=region({self.source_region})]",
-            outfile=(outfile := f"{self.event_list}.src"),
+            infile=f"{self.event_list}[bin x={sky_bounds.x_min}:{sky_bounds.x_max}:0.5"
+            f",y={sky_bounds.y_min}:{sky_bounds.y_max}:0.5]",
+            outfile=(sky_coords_image := f"{self.event_list}.skyimg.fits"),
         )
-        return Path(outfile)
+        with io.fits.open(sky_coords_image, mode="append") as hdu_list:
+            hdu_list.append(convert_bounds_object_to_hdu(sky_bounds))
+        dmstat(infile=f"{self.event_list}[cols detx,dety]")
+
+        detector_bounds = CropBounds(*dmstat.out_min.split(","), *dmstat.out_max.split(","))
+        dmcopy(
+            infile=f"{self.event_list}[bin detx={detector_bounds.x_min}:{detector_bounds.x_max}:0.5"
+            f",dety={detector_bounds.y_min}:{detector_bounds.y_max}:0.5]",
+            outfile=(detector_coords_image := f"{self.event_list}.detimg.fits"),
+        )
+        with io.fits.open(detector_coords_image, mode="append") as hdu_list:
+            hdu_list.append(convert_bounds_object_to_hdu(detector_bounds))
+        self.sky_coords_image, self.detector_coords_image = sky_coords_image, detector_coords_image
 
     def get_observation_details(self):
         """Gets keys from the header block detailing the observation information."""
@@ -108,7 +143,7 @@ class AcisProcessor(ObservationProcessor):
         return outfiles
 
     @staticmethod
-    def filter_lightcurves(lightcurves):
+    def export_lightcurve_columns(lightcurves):
         outfiles = []
         for lightcurve in lightcurves:
             dmlist(
@@ -120,7 +155,7 @@ class AcisProcessor(ObservationProcessor):
             outfiles.append(Path(outfile))
         return outfiles
 
-    def parse(self, lightcurves):
+    def plot(self, lightcurves):
         lightcurve_data: dict[str, DataFrame] = {
             energy_level: table.Table.read(lightcurve, format="ascii").to_pandas()
             for energy_level, lightcurve in zip(AcisProcessor.ENERGY_LEVELS.keys(), lightcurves)
@@ -130,13 +165,14 @@ class AcisProcessor(ObservationProcessor):
             lightcurve_data[energy_level] = lightcurve_dataframe[
                 lightcurve_dataframe["EXPOSURE"] != 0
             ]
-        # The type casts are important as the data is returned as NumPy data types by CIAO.
+        # The type casts are important as the data is returned by CIAO as NumPy data types.
         observation_data = ObservationData(
             average_count_rate=float(round(lightcurve_data["broad"]["COUNT_RATE"].mean(), 3)),
             total_counts=int(lightcurve_data["broad"]["COUNTS"].sum()),
             total_exposure_time=float(round(lightcurve_data["broad"]["EXPOSURE"].sum(), 3)),
             raw_start_time=int(lightcurve_data["broad"]["TIME"].min()),
         )
+        # This data is just so people can view the exact numerical data that was plotted.
         output_plot_data = StringIO(
             lightcurve_data["broad"][["TIME", "COUNT_RATE", "COUNT_RATE_ERR"]].to_csv()
         )
@@ -144,14 +180,14 @@ class AcisProcessor(ObservationProcessor):
             observation_header_info=self.get_observation_details(),
             observation_data=observation_data,
             plot_csv_data=output_plot_data,
-            plot_svg_data=self.plot(lightcurve_data),
-            postagestamp_png_data=self.plot_postagestamp(self.source_image)
-            if self.source_image
-            else None,
+            plot_svg_data=self.create_plot(lightcurve_data),
+            postagestamp_png_data=postage_stamp_plotter.plot_postagestamps(
+                self.sky_coords_image, self.detector_coords_image
+            ),
         )
 
     @staticmethod
-    def plot(lightcurve_data: dict[str, DataFrame]):
+    def create_plot(lightcurve_data: dict[str, DataFrame]):
         """Generate a pyplot plot to model the lightcurves."""
         matplotlib.use("svg")
         initial_time = lightcurve_data["broad"]["TIME"].min()
@@ -196,19 +232,6 @@ class AcisProcessor(ObservationProcessor):
         pyplot.close(figure)
         return svg_data
 
-    @staticmethod
-    def plot_postagestamp(source_image_file):
-        """Plots a binned image representing photon position data restricted to the source region"""
-        matplotlib.use("agg")
-        pyplot.style.use(visualization.astropy_mpl_style)
-        image_data = io.fits.getdata(source_image_file, ext=0)
-        figure = pyplot.figure()
-        plot = figure.add_subplot(111)
-        plot.imshow(image_data, cmap="gray")
-        pyplot.savefig(png_data := BytesIO(), bbox_inches="tight")
-        pyplot.close(figure)
-        return png_data
-
 
 class HrcProcessor(ObservationProcessor):
     """Processes for observations produced by the HRC (High Resolution Camera) instrument aboard
@@ -219,8 +242,8 @@ class HrcProcessor(ObservationProcessor):
         raise NotImplementedError()
 
     @staticmethod
-    def filter_lightcurves(lightcurves):
+    def export_lightcurve_columns(lightcurves):
         raise NotImplementedError()
 
-    def parse(self, lightcurves):
+    def plot(self, lightcurves):
         raise NotImplementedError()

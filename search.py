@@ -69,7 +69,7 @@ class SourceManager:
         self.sources = significant_results
 
     @staticmethod
-    def download_data_products(download_directory, right_ascension, declination, filetypes):
+    def download_data_products(download_directory, right_ascension, declination):
         """Uses a ciao tool to download certain data products from csc2 for a given source using
         the obtained celestial sphere coords for a source name. Currently we are only using the
         event file and the source region map."""
@@ -83,7 +83,7 @@ class SourceManager:
             download="all",
             root=download_directory,
             bands="broad, wide",
-            filetypes=filetypes,
+            filetypes="regevt",
             catalog="csc2",
             verbose="0",
             clobber="1",
@@ -118,7 +118,6 @@ class SourceManager:
         Spins up another thread as a child to this one to handle counting and reporting the number
         of data products downloaded in the file system."""
         data_directory = Path(self.config["Data Directory"])
-        filetypes = "regevt, reg, regimg" if self.config["Plot Image"] else "regevt, reg"
         shutil.rmtree(data_directory, ignore_errors=True)
         source_count = 0
         for source_count, source in enumerate(self.sources, 1):
@@ -133,7 +132,7 @@ class SourceManager:
                 args=(source_directory, finished_downloading_source),
             )
             progress_thread.start()
-            self.download_data_products(data_directory, source["ra"], source["dec"], filetypes)
+            self.download_data_products(data_directory, source["ra"], source["dec"])
             finished_downloading_source.set()
             self.sources_downloaded += 1
             progress_thread.join()

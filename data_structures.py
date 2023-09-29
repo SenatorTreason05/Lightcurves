@@ -1,6 +1,5 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 from io import BytesIO, StringIO
-from pathlib import Path
 from tkinter.ttk import Checkbutton, Entry, Label
 from typing import Callable, NamedTuple
 from uuid import UUID
@@ -21,20 +20,6 @@ class Message(NamedTuple):
 
     content: str
     uuid: UUID = None
-
-
-class DataProducts(NamedTuple):
-    """Holds file paths for data products."""
-
-    event_list_file: Path = None
-    source_region_file: Path = None
-    region_image_file: Path = None
-
-    def __reduce__(self):
-        return (
-            self.__class__,
-            (str(self.event_list_file), str(self.source_region_file), str(self.region_image_file)),
-        )
 
 
 class ObservationHeaderInfo(NamedTuple):
