@@ -14,7 +14,8 @@ class Exporter:
         self.config = config
         self.source_count = source_count
         self.output_directory = (
-            Path(config["Output Directory"]) / f"{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
+            Path(config["Output Directory"])
+            / f"{config['Object Name']}-{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
         )
         self.output_directory.mkdir(parents=True, exist_ok=True)
         self.master_data = {}
