@@ -30,10 +30,10 @@ def get_real_ticks_from_real_bounds(real_bounds, image_bounds, tick_interval=5):
 
 
 def plot_postagestamps(sky_image, detector_image):
-    """Plots the binned sky and detector images which are read as NumPy arrays by astropy. The
-    detector image is done in a square root scale to give the image more contrast. This requires
+    """Plots the binned sky and detector images which are read as NumPy arrays by astropy. Requires
     the FITS images to have a 'BOUNDS' extension where min and max limits are stored in a binary
-    table (BINTABLE). The PNG data is returned in a BytesIO object."""
+    table (BINTABLE). The detector image is done on a square root scale to give the image more
+    contrast. The PNG data is returned in a BytesIO object."""
     matplotlib.use("agg")
     sky_image_data = io.fits.getdata(sky_image, ext=0)
     detector_image_data = numpy.sqrt(io.fits.getdata(detector_image, ext=0))

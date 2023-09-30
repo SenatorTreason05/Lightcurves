@@ -56,7 +56,7 @@ class LightcurveGenerator:
         transfer_thread = Thread(target=transfer_queues)
         transfer_thread.start()
 
-        with futures.ProcessPoolExecutor() as executor:
+        with futures.ProcessPoolExecutor(max_workers=14) as executor:
             while True:
                 source_directory = source_queue.get()
                 if not source_directory:
@@ -108,7 +108,7 @@ class LightcurveGenerator:
         """Map processors to observation directories."""
         __ = [
             self.get_instrument_processor(
-                self.get_observation_files(observation_directory),
+                *self.get_observation_files(observation_directory),
                 message_collection_queue,
                 self.config,
             )
@@ -125,21 +125,24 @@ class LightcurveGenerator:
     def get_observation_files(observation_directory: Path):
         """Return the observation data product files."""
         LightcurveGenerator.unzip_fits_files(observation_directory)
+        event_list_file, source_region_file = None, None
         for data_product_file in observation_directory.glob("*.fits"):
             stem = data_product_file.stem.lower()
             if stem.endswith("regevt3"):
                 event_list_file = data_product_file
-            if not event_list_file:
-                raise OSError("Event file missing.")
-        return event_list_file
+            if stem.endswith("reg3"):
+                source_region_file = data_product_file
+        if not event_list_file or not source_region_file:
+            raise OSError("Data product missing.")
+        return event_list_file, source_region_file
 
     @staticmethod
-    def get_instrument_processor(event_list_file, message_collection, config):
+    def get_instrument_processor(event_list_file, source_region_file, message_collection, config):
         """Determines which instrument on Chandra the observation was obtained through: ACIS
         (Advanced CCD Imaging Spectrometer) or HRC (High Resolution Camera)"""
         acis_pattern, hrc_pattern = r"^acis", r"^hrc"
         if re.match(acis_pattern, event_list_file.name):
-            return AcisProcessor(event_list_file, message_collection, config)
+            return AcisProcessor(event_list_file, source_region_file, message_collection, config)
         if re.match(hrc_pattern, event_list_file.event_list_file.name):
-            return HrcProcessor(event_list_file, message_collection, config)
+            return HrcProcessor(event_list_file, source_region_file, message_collection, config)
         raise RuntimeError("Unable to resolve observation instrument")

@@ -19,8 +19,9 @@ from data_structures import LightcurveParseResults, Message, ObservationData, Ob
 class ObservationProcessor(ABC):
     """Base class for observation processor implementations for different Chandra instruments."""
 
-    def __init__(self, event_list_file, message_collection_queue, config):
+    def __init__(self, event_list_file, source_region_file, message_collection_queue, config):
         self.event_list = Path(event_list_file)
+        self.sky_region_qualifier = f"[sky=region({source_region_file})]"
         self.detector_coords_image, self.sky_coords_image = None, None
         self.message_collection_queue = message_collection_queue
         self.binsize = config["Binsize"]
@@ -40,7 +41,9 @@ class ObservationProcessor(ABC):
             status("Retrieving images...")
             self.get_images()
             status("Extracting lightcurves...")
-            lightcurves = self.extract_lightcurves(self.event_list, self.binsize)
+            lightcurves = self.extract_lightcurves(
+                self.event_list, self.sky_region_qualifier, self.binsize
+            )
             status("Exporting columns...")
             filtered_lightcurves = self.export_lightcurve_columns(lightcurves)
             status("Plotting lightcurves...")
@@ -51,7 +54,7 @@ class ObservationProcessor(ABC):
 
     @staticmethod
     @abstractmethod
-    def extract_lightcurves(event_list, binsize):
+    def extract_lightcurves(event_list, sky_region_qualifier, binsize):
         """Extract lightcurve(s) from an event list, one should pass in one with a specific source
         region extracted."""
 
@@ -82,8 +85,9 @@ class ObservationProcessor(ABC):
         dmstat(infile=f"{self.event_list}[cols x,y]")
         sky_bounds = CropBounds(*dmstat.out_min.split(","), *dmstat.out_max.split(","))
         dmcopy(
-            infile=f"{self.event_list}[bin x={sky_bounds.x_min}:{sky_bounds.x_max}:0.5"
-            f",y={sky_bounds.y_min}:{sky_bounds.y_max}:0.5]",
+            infile=f"{self.event_list}{self.sky_region_qualifier}"
+            f"[bin x={sky_bounds.x_min}:{sky_bounds.x_max}:0.5,"
+            f"y={sky_bounds.y_min}:{sky_bounds.y_max}:0.5]",
             outfile=(sky_coords_image := f"{self.event_list}.skyimg.fits"),
         )
         with io.fits.open(sky_coords_image, mode="append") as hdu_list:
@@ -92,8 +96,9 @@ class ObservationProcessor(ABC):
 
         detector_bounds = CropBounds(*dmstat.out_min.split(","), *dmstat.out_max.split(","))
         dmcopy(
-            infile=f"{self.event_list}[bin detx={detector_bounds.x_min}:{detector_bounds.x_max}:0.5"
-            f",dety={detector_bounds.y_min}:{detector_bounds.y_max}:0.5]",
+            infile=f"{self.event_list}{self.sky_region_qualifier}"
+            f"[bin detx={detector_bounds.x_min}:{detector_bounds.x_max}:0.5,"
+            f"dety={detector_bounds.y_min}:{detector_bounds.y_max}:0.5]",
             outfile=(detector_coords_image := f"{self.event_list}.detimg.fits"),
         )
         with io.fits.open(detector_coords_image, mode="append") as hdu_list:
@@ -130,11 +135,11 @@ class AcisProcessor(ObservationProcessor):
         return binsize // time_resolution * time_resolution
 
     @staticmethod
-    def extract_lightcurves(event_list, binsize):
+    def extract_lightcurves(event_list, sky_region_qualifier, binsize):
         outfiles = []
         for light_level, energy_range in AcisProcessor.ENERGY_LEVELS.items():
             dmextract(
-                infile=f"{event_list}[{energy_range}][bin time=::"
+                infile=f"{event_list}{sky_region_qualifier}[{energy_range}][bin time=::"
                 f"{AcisProcessor.adjust_binsize(event_list, binsize)}]",
                 outfile=(outfile := f"{event_list}.{light_level}.lc"),
                 opt="ltc1",
@@ -173,9 +178,7 @@ class AcisProcessor(ObservationProcessor):
             raw_start_time=int(lightcurve_data["broad"]["TIME"].min()),
         )
         # This data is just so people can view the exact numerical data that was plotted.
-        output_plot_data = StringIO(
-            lightcurve_data["broad"][["TIME", "COUNT_RATE", "COUNT_RATE_ERR"]].to_csv()
-        )
+        output_plot_data = StringIO(lightcurve_data["broad"].to_string())
         return LightcurveParseResults(
             observation_header_info=self.get_observation_details(),
             observation_data=observation_data,

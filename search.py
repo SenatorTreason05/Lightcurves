@@ -83,7 +83,7 @@ class SourceManager:
             download="all",
             root=download_directory,
             bands="broad, wide",
-            filetypes="regevt",
+            filetypes="regevt, reg",
             catalog="csc2",
             verbose="0",
             clobber="1",
