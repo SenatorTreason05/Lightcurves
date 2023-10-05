@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Main",
+      "type": "python",
+      "python": "/Users/mihirpatankar/miniconda3/envs/ciao/bin/python3.10",
+      "request": "launch",
+      "program": "/Users/mihirpatankar/Documents/Projects/Lightcurves/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+    }
+  ]
+}
