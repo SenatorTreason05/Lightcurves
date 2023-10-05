@@ -1,12 +1,13 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 import gzip
+import multiprocessing
 import re
+import time
 from concurrent import futures
 from pathlib import Path
-import multiprocessing
 from threading import Thread
-from data_structures import LightcurveParseResults, Message
 
+from data_structures import CountsChecker, DataProducts, Message
 from lightcurve_processing import AcisProcessor, HrcProcessor
 
 
@@ -43,8 +44,8 @@ class LightcurveGenerator:
     def dispatch_source_processing(self, source_queue):
         """Start the processing of an observation directory, after validating the file structure
         seems correct."""
-
-        message_collection_queue = multiprocessing.Manager().Queue()
+        manager = multiprocessing.Manager()
+        message_collection_queue = manager.Queue()
 
         def transfer_queues():
             while True:
@@ -72,9 +73,25 @@ class LightcurveGenerator:
                     for observation_directory in source_directory.iterdir()
                     if observation_directory.is_dir()
                 ]
-                workers = self.assign_workers(observation_directories, message_collection_queue)
+                counts_checker = CountsChecker(
+                    manager.Queue(maxsize=len(observation_directories)),
+                    manager.Event(),
+                )
+                workers = self.assign_workers(
+                    observation_directories, message_collection_queue, counts_checker
+                )
                 worker_futures = [executor.submit(worker.process) for worker in workers]
+                count_checker_thread = Thread(
+                    target=self.verify_sufficient_counts_in_source,
+                    args=(
+                        counts_checker,
+                        len(worker_futures),
+                        self.config["Minimum Counts"],
+                    ),
+                )
+                count_checker_thread.start()
                 done, not_done = futures.wait(worker_futures, return_when=futures.FIRST_EXCEPTION)
+                count_checker_thread.join()
 
                 results = []
                 for future in done:
@@ -86,30 +103,39 @@ class LightcurveGenerator:
                         ) from exception
                 if len(not_done) > 0:
                     raise RuntimeError("Some observations were not processed.")
-                self.print_queue.put(Message("Done with: " + source_directory.name))
                 self.increment_sources_processed()
-                if self.get_maximum_counts_in_source(results) < self.config["Minimum Counts"]:
+                if None in results:
+                    self.print_queue.put(Message("Insufficient counts in " + source_directory.name))
                     continue
+                self.print_queue.put(Message("Done with: " + source_directory.name))
                 self.exporter.add_source(source_directory.name, results)
 
             message_collection_queue.put(None)
             transfer_thread.join()
 
     @staticmethod
-    def get_maximum_counts_in_source(source_processing_results: list[LightcurveParseResults]):
-        """Makes sure that at least one observation in the source meets the user specified total
-        counts threshold"""
-        return max(
-            source_processing_results,
-            key=lambda observation: observation.observation_data.total_counts,
-        ).observation_data.total_counts
+    def verify_sufficient_counts_in_source(
+        counts_checker: CountsChecker, queue_max_size, max_counts
+    ):
+        """Makes sure that all observations contain enough counts to meet the user specified
+        threshold, otherwise signal to the processor that it needs to cancel itself."""
+        while True:
+            if counts_checker.queue.qsize() == queue_max_size:
+                queue_members = tuple(counts_checker.queue.get() for _ in range(queue_max_size))
+                if any(observation < max_counts for observation in queue_members):
+                    counts_checker.cancel_event.set()
+                for _ in range(queue_max_size):
+                    counts_checker.queue.task_done()
+                break
+            time.sleep(0.1)
 
-    def assign_workers(self, observation_directories, message_collection_queue):
+    def assign_workers(self, observation_directories, message_collection_queue, counts_check_queue):
         """Map processors to observation directories."""
         __ = [
             self.get_instrument_processor(
                 *self.get_observation_files(observation_directory),
                 message_collection_queue,
+                counts_check_queue,
                 self.config,
             )
             for observation_directory in observation_directories
@@ -137,12 +163,15 @@ class LightcurveGenerator:
         return event_list_file, source_region_file
 
     @staticmethod
-    def get_instrument_processor(event_list_file, source_region_file, message_collection, config):
+    def get_instrument_processor(
+        event_list_file, source_region_file, message_collection, counts_checker, config
+    ):
         """Determines which instrument on Chandra the observation was obtained through: ACIS
         (Advanced CCD Imaging Spectrometer) or HRC (High Resolution Camera)"""
+        data_products = DataProducts(event_list_file, source_region_file)
         acis_pattern, hrc_pattern = r"^acis", r"^hrc"
-        if re.match(acis_pattern, event_list_file.name):
-            return AcisProcessor(event_list_file, source_region_file, message_collection, config)
-        if re.match(hrc_pattern, event_list_file.event_list_file.name):
-            return HrcProcessor(event_list_file, source_region_file, message_collection, config)
+        if re.match(acis_pattern, data_products.event_list_file.name):
+            return AcisProcessor(data_products, message_collection, counts_checker, config)
+        if re.match(hrc_pattern, data_products.event_list_file.name):
+            return HrcProcessor(data_products, message_collection, counts_checker, config)
         raise RuntimeError("Unable to resolve observation instrument")

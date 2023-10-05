@@ -1,5 +1,6 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 from io import BytesIO, StringIO
+import multiprocessing
 from tkinter.ttk import Checkbutton, Entry, Label
 from typing import Callable, NamedTuple
 from uuid import UUID
@@ -20,6 +21,21 @@ class Message(NamedTuple):
 
     content: str
     uuid: UUID = None
+
+
+class DataProducts(NamedTuple):
+    """The data products passed into the observation processors."""
+
+    event_list_file: str
+    source_region_file: str
+
+
+class CountsChecker(NamedTuple):
+    """Objects used for tracking total counts in observation processors so they can be verified to
+    meet the minimum threshold."""
+
+    queue: multiprocessing.Queue
+    cancel_event: multiprocessing.Event
 
 
 class ObservationHeaderInfo(NamedTuple):

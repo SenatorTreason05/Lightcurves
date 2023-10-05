@@ -12,6 +12,7 @@ from astropy import io, table
 from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, new_pfiles_environment
 from matplotlib import pyplot
 from pandas import DataFrame
+
 import postage_stamp_plotter
 from data_structures import LightcurveParseResults, Message, ObservationData, ObservationHeaderInfo
 
@@ -19,13 +20,13 @@ from data_structures import LightcurveParseResults, Message, ObservationData, Ob
 class ObservationProcessor(ABC):
     """Base class for observation processor implementations for different Chandra instruments."""
 
-    def __init__(self, event_list_file, source_region_file, message_collection_queue, config):
-        self.event_list = Path(event_list_file)
-        self.sky_region_qualifier = f"[sky=region({source_region_file})]"
+    def __init__(self, data_products, message_collection_queue, counts_checker, config):
+        self.event_list = Path(data_products.event_list_file)
+        self.sky_region_qualifier = f"[sky=region({data_products.source_region_file})]"
         self.detector_coords_image, self.sky_coords_image = None, None
         self.message_collection_queue = message_collection_queue
+        self.counts_checker = counts_checker
         self.binsize = config["Binsize"]
-        self.minimum_counts = config["Minimum Counts"]
 
     def process(self):
         """Sequence in which all steps of the processing routine are called."""
@@ -44,10 +45,16 @@ class ObservationProcessor(ABC):
             lightcurves = self.extract_lightcurves(
                 self.event_list, self.sky_region_qualifier, self.binsize
             )
-            status("Exporting columns...")
+            status("Copying columns...")
             filtered_lightcurves = self.export_lightcurve_columns(lightcurves)
+            status("Checking counts...")
+            lightcurve_data = self.get_lightcurve_data(filtered_lightcurves)
+            self.counts_checker.queue.put(self.get_lightcurve_counts(lightcurve_data))
+            self.counts_checker.queue.join()
+            if self.counts_checker.cancel_event.is_set():
+                return None
             status("Plotting lightcurves...")
-            parse_results = self.plot(filtered_lightcurves)
+            parse_results = self.plot(lightcurve_data)
             status("Plotting lightcurves... Done")
 
         return parse_results
@@ -63,8 +70,17 @@ class ObservationProcessor(ABC):
     def export_lightcurve_columns(lightcurves: list[Path]):
         """Filter lightcurve(s) to get the columns we care about and format them."""
 
+    @staticmethod
     @abstractmethod
-    def plot(self, lightcurves: list[Path]) -> LightcurveParseResults:
+    def get_lightcurve_data(lightcurves: list[Path]):
+        """Return the data from the lightcurve files in a python object."""
+
+    @staticmethod
+    def get_lightcurve_counts(lightcurve_data):
+        """Return the total counts in a lightcurve so they can be verified to meet the threshold."""
+
+    @abstractmethod
+    def plot(self, lightcurve_data) -> LightcurveParseResults:
         """Parse lightcurve(s). Returns what will then be returned by the thread pool future."""
 
     def get_images(self):
@@ -160,7 +176,8 @@ class AcisProcessor(ObservationProcessor):
             outfiles.append(Path(outfile))
         return outfiles
 
-    def plot(self, lightcurves):
+    @staticmethod
+    def get_lightcurve_data(lightcurves: list[Path]):
         lightcurve_data: dict[str, DataFrame] = {
             energy_level: table.Table.read(lightcurve, format="ascii").to_pandas()
             for energy_level, lightcurve in zip(AcisProcessor.ENERGY_LEVELS.keys(), lightcurves)
@@ -170,10 +187,17 @@ class AcisProcessor(ObservationProcessor):
             lightcurve_data[energy_level] = lightcurve_dataframe[
                 lightcurve_dataframe["EXPOSURE"] != 0
             ]
+        return lightcurve_data
+
+    @staticmethod
+    def get_lightcurve_counts(lightcurve_data):
+        return int(lightcurve_data["broad"]["COUNTS"].sum())
+
+    def plot(self, lightcurve_data):
         # The type casts are important as the data is returned by CIAO as NumPy data types.
         observation_data = ObservationData(
             average_count_rate=float(round(lightcurve_data["broad"]["COUNT_RATE"].mean(), 3)),
-            total_counts=int(lightcurve_data["broad"]["COUNTS"].sum()),
+            total_counts=self.get_lightcurve_counts(lightcurve_data),
             total_exposure_time=float(round(lightcurve_data["broad"]["EXPOSURE"].sum(), 3)),
             raw_start_time=int(lightcurve_data["broad"]["TIME"].min()),
         )
@@ -241,12 +265,20 @@ class HrcProcessor(ObservationProcessor):
     Chandra."""
 
     @staticmethod
-    def extract_lightcurves(event_list, binsize):
+    def extract_lightcurves(event_list, sky_region_qualifier, binsize):
         raise NotImplementedError()
 
     @staticmethod
     def export_lightcurve_columns(lightcurves):
         raise NotImplementedError()
 
-    def plot(self, lightcurves):
+    @staticmethod
+    def get_lightcurve_data(lightcurves):
+        raise NotImplementedError()
+
+    @staticmethod
+    def get_lightcurve_counts(lightcurve_data):
+        raise NotImplementedError()
+
+    def plot(self, lightcurve_data):
         raise NotImplementedError()
