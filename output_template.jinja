@@ -50,9 +50,9 @@
     .table-of-contents .source-list {
       column-count: 4;
       column-gap: 2em;
-      list-style: none;
     }
 
+    .source-list,
     .source-list .observation-list {
       list-style: decimal-leading-zero;
     }
@@ -67,13 +67,12 @@
   </style>
 </head>
 
-
 <body>
   <h1>Light Curve Output for {{ object_name }}</h1>
   <p>
     Significance Threshold: ≥{{ significance_threshold }}
     <br /> Counts Threshold: ≥{{ counts_threshold }}
-    <br />Search Radius: {{ search_radius }}
+    <br />Search Radius: {{ search_radius }} arcmin
     <br />Sources: {{ source_count }}
   </p>
 
@@ -87,9 +86,17 @@
         <ul class="observation-list">
           <!--Observations-->
           {% for observation in source_data %}
+          {% set total_counts = observation.columns["Total Counts"] %}
+          {% if total_counts >= 1000 %}
+          {% set li_color = "red" %}
+          {% elif total_counts >= 500 %}
+          {% set li_color = "orange" %}
+          {% else %}
+          {% set li_color = "blue" %}
+          {% endif %}
           <li>
-            <a href="#{{ source_name + '/' + observation.columns['Observation Id'] }}">
-              {{observation.columns['Observation Id'] }}
+            <a style="color: {{ li_color }}" href="#{{ source_name + '/' + observation.columns['Observation Id'] }}">
+              {{observation.columns['Observation Id']}}
             </a>
           </li>
           {% endfor %}
