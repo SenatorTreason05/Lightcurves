@@ -1,5 +1,6 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 from io import BytesIO
+from typing import NamedTuple
 
 import matplotlib
 import numpy
@@ -50,14 +51,14 @@ def plot_postagestamps(sky_image, detector_image):
         extent=[0, sky_image_data.shape[1], 0, sky_image_data.shape[0]],
     )
     with io.fits.open(sky_image) as hdu_list:
-        sky_bounds = table.Table.read(hdu_list["BOUNDS"])
+        sky_bounds = CropBounds.from_hdu_list(hdu_list["BOUNDS"])
     sky_y_ticks = get_real_ticks_from_real_bounds(
-        (round(float(sky_bounds["y_min"][0])), round(float(sky_bounds["y_max"][0]))),
+        (round(sky_bounds.y_min), round(sky_bounds.y_max)),
         sky_image_plot.get_ylim(),
     )
     sky_image_plot.set_yticks(*sky_y_ticks)
     sky_x_ticks = get_real_ticks_from_real_bounds(
-        (round(float(sky_bounds["x_min"][0])), round(float(sky_bounds["x_max"][0]))),
+        (round(sky_bounds.x_min), round(sky_bounds.x_max)),
         sky_image_plot.get_xlim(),
     )
     sky_image_plot.set_xticks(*sky_x_ticks, rotation=90)
@@ -71,17 +72,50 @@ def plot_postagestamps(sky_image, detector_image):
         extent=[0, detector_image_data.shape[1], 0, detector_image_data.shape[0]],
     )
     with io.fits.open(detector_image) as hdu_list:
-        detector_bounds = table.Table.read(hdu_list["BOUNDS"])
+        detector_bounds = CropBounds.from_hdu_list(hdu_list["BOUNDS"])
     detector_y_ticks = get_real_ticks_from_real_bounds(
-        (round(float(detector_bounds["y_min"][0])), round(float(detector_bounds["y_max"][0]))),
+        (round(detector_bounds.y_min), round(detector_bounds.y_max)),
         detector_image_plot.get_ylim(),
     )
     detector_image_plot.set_yticks(*detector_y_ticks)
     detector_x_ticks = get_real_ticks_from_real_bounds(
-        (round(float(detector_bounds["x_min"][0])), round(float(detector_bounds["x_max"][0]))),
+        (round(detector_bounds.x_min), round(detector_bounds.x_max)),
         detector_image_plot.get_xlim(),
     )
     detector_image_plot.set_xticks(*detector_x_ticks, rotation=90)
     pyplot.savefig(png_data := BytesIO(), bbox_inches="tight")
     pyplot.close(figure)
     return png_data
+
+
+class CropBounds(NamedTuple):
+    """Holds the bounding box of our postage stamp images."""
+
+    x_min: float
+    y_min: float
+    x_max: float
+    y_max: float
+
+    @classmethod
+    def from_source_region_bounds(cls, x_min, y_min, x_max, y_max):
+        """Gives the image some padding so the background region can be observed. This should be
+        immune to edge cases where the source region plus padding exceeds the dimensions of the
+        whole image."""
+        padding = 20  # In chandra pixels
+        return cls(
+            float(x_min) - padding,
+            float(y_min) - padding,
+            float(x_max) + padding,
+            float(y_max) + padding,
+        )
+
+    @classmethod
+    def from_hdu_list(cls, hdu_list):
+        """Parse our BOUNDS extension HDU list from an image FITS file."""
+        bounds_table = table.Table.read(hdu_list)
+        return cls(
+            float(bounds_table["x_min"][0]),
+            float(bounds_table["y_min"][0]),
+            float(bounds_table["x_max"][0]),
+            float(bounds_table["y_max"][0]),
+        )

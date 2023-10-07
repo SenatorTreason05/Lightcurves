@@ -1,7 +1,6 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 import uuid
 from abc import ABC, abstractmethod
-from collections import namedtuple
 from io import StringIO
 from pathlib import Path
 
@@ -13,8 +12,8 @@ from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, ne
 from matplotlib import pyplot
 from pandas import DataFrame
 
-import postage_stamp_plotter
 from data_structures import LightcurveParseResults, Message, ObservationData, ObservationHeaderInfo
+from postage_stamp_plotter import CropBounds, plot_postagestamps
 
 
 class ObservationProcessor(ABC):
@@ -22,7 +21,7 @@ class ObservationProcessor(ABC):
 
     def __init__(self, data_products, message_collection_queue, counts_checker, config):
         self.event_list = Path(data_products.event_list_file)
-        self.sky_region_qualifier = f"[sky=region({data_products.source_region_file})]"
+        self.source_region = Path(data_products.source_region_file)
         self.detector_coords_image, self.sky_coords_image = None, None
         self.message_collection_queue = message_collection_queue
         self.counts_checker = counts_checker
@@ -39,12 +38,10 @@ class ObservationProcessor(ABC):
             def status(status):
                 self.message_collection_queue.put(Message(f"{prefix}{status}", message_uuid))
 
-            status("Retrieving images...")
-            self.get_images()
+            status("Isolating source region...")
+            region_event_list = self.isolate_source_region(self.event_list, self.source_region)
             status("Extracting lightcurves...")
-            lightcurves = self.extract_lightcurves(
-                self.event_list, self.sky_region_qualifier, self.binsize
-            )
+            lightcurves = self.extract_lightcurves(region_event_list, self.binsize)
             status("Copying columns...")
             filtered_lightcurves = self.export_lightcurve_columns(lightcurves)
             status("Checking counts...")
@@ -53,6 +50,8 @@ class ObservationProcessor(ABC):
             self.counts_checker.queue.join()
             if self.counts_checker.cancel_event.is_set():
                 return None
+            status("Retrieving images...")
+            self.get_images(region_event_list)
             status("Plotting lightcurves...")
             parse_results = self.plot(lightcurve_data)
             status("Plotting lightcurves... Done")
@@ -61,7 +60,7 @@ class ObservationProcessor(ABC):
 
     @staticmethod
     @abstractmethod
-    def extract_lightcurves(event_list, sky_region_qualifier, binsize):
+    def extract_lightcurves(event_list, binsize):
         """Extract lightcurve(s) from an event list, one should pass in one with a specific source
         region extracted."""
 
@@ -83,39 +82,50 @@ class ObservationProcessor(ABC):
     def plot(self, lightcurve_data) -> LightcurveParseResults:
         """Parse lightcurve(s). Returns what will then be returned by the thread pool future."""
 
-    def get_images(self):
+    @staticmethod
+    def isolate_source_region(event_list: Path, source_region):
+        dmcopy(
+            infile=f"{event_list}[sky=region({source_region})]",
+            outfile=(outfile := f"{event_list.with_suffix('.src.fits')}"),
+        )
+        return outfile
+
+    def get_images(self, region_event_list):
         """Gets the images from the event list, one in sky coordinates, the other in detector
         coordinates. This is useful to be able to track if a lightcurve dip corresponds with a
         source going over the edge of the detector. The image is cropped otherwise we would be
         dealing with hundreds of thousands of blank pixels. The cropping bounds are written to the
         FITS file for later use in plotting."""
-        CropBounds = namedtuple("CropBounds", ["x_min", "y_min", "x_max", "y_max"])
 
-        def convert_bounds_object_to_hdu(bounds):
+        def convert_bounds_object_to_hdu(bounds: CropBounds):
             hdu = io.fits.table_to_hdu(
                 table.Table({field: [(getattr(bounds, field))] for field in bounds._fields})
             )
             hdu.header["EXTNAME"] = "BOUNDS"
             return hdu
 
-        dmstat(infile=f"{self.event_list}[cols x,y]")
-        sky_bounds = CropBounds(*dmstat.out_min.split(","), *dmstat.out_max.split(","))
+        dmstat(infile=f"{region_event_list}[cols x,y]")
+        sky_bounds = CropBounds.from_source_region_bounds(
+            *dmstat.out_min.split(","), *dmstat.out_max.split(",")
+        )
         dmcopy(
-            infile=f"{self.event_list}{self.sky_region_qualifier}"
+            infile=f"{self.event_list}"
             f"[bin x={sky_bounds.x_min}:{sky_bounds.x_max}:0.5,"
             f"y={sky_bounds.y_min}:{sky_bounds.y_max}:0.5]",
-            outfile=(sky_coords_image := f"{self.event_list}.skyimg.fits"),
+            outfile=(sky_coords_image := f"{region_event_list}.skyimg.fits"),
         )
         with io.fits.open(sky_coords_image, mode="append") as hdu_list:
             hdu_list.append(convert_bounds_object_to_hdu(sky_bounds))
-        dmstat(infile=f"{self.event_list}[cols detx,dety]")
+        dmstat(infile=f"{region_event_list}[cols detx,dety]")
 
-        detector_bounds = CropBounds(*dmstat.out_min.split(","), *dmstat.out_max.split(","))
+        detector_bounds = CropBounds.from_source_region_bounds(
+            *dmstat.out_min.split(","), *dmstat.out_max.split(",")
+        )
         dmcopy(
-            infile=f"{self.event_list}{self.sky_region_qualifier}"
+            infile=f"{self.event_list}"
             f"[bin detx={detector_bounds.x_min}:{detector_bounds.x_max}:0.5,"
             f"dety={detector_bounds.y_min}:{detector_bounds.y_max}:0.5]",
-            outfile=(detector_coords_image := f"{self.event_list}.detimg.fits"),
+            outfile=(detector_coords_image := f"{region_event_list}.detimg.fits"),
         )
         with io.fits.open(detector_coords_image, mode="append") as hdu_list:
             hdu_list.append(convert_bounds_object_to_hdu(detector_bounds))
@@ -151,11 +161,11 @@ class AcisProcessor(ObservationProcessor):
         return binsize // time_resolution * time_resolution
 
     @staticmethod
-    def extract_lightcurves(event_list, sky_region_qualifier, binsize):
+    def extract_lightcurves(event_list, binsize):
         outfiles = []
         for light_level, energy_range in AcisProcessor.ENERGY_LEVELS.items():
             dmextract(
-                infile=f"{event_list}{sky_region_qualifier}[{energy_range}][bin time=::"
+                infile=f"{event_list}[{energy_range}][bin time=::"
                 f"{AcisProcessor.adjust_binsize(event_list, binsize)}]",
                 outfile=(outfile := f"{event_list}.{light_level}.lc"),
                 opt="ltc1",
@@ -208,7 +218,7 @@ class AcisProcessor(ObservationProcessor):
             observation_data=observation_data,
             plot_csv_data=output_plot_data,
             plot_svg_data=self.create_plot(lightcurve_data),
-            postagestamp_png_data=postage_stamp_plotter.plot_postagestamps(
+            postagestamp_png_data=plot_postagestamps(
                 self.sky_coords_image, self.detector_coords_image
             ),
         )
@@ -265,7 +275,7 @@ class HrcProcessor(ObservationProcessor):
     Chandra."""
 
     @staticmethod
-    def extract_lightcurves(event_list, sky_region_qualifier, binsize):
+    def extract_lightcurves(event_list, binsize):
         raise NotImplementedError()
 
     @staticmethod
