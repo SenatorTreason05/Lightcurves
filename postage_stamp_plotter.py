@@ -1,6 +1,6 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
+from dataclasses import dataclass, fields
 from io import BytesIO
-from typing import NamedTuple
 
 import matplotlib
 import numpy
@@ -36,7 +36,7 @@ def plot_postagestamps(sky_image, detector_image):
     table (BINTABLE). The detector image is done on a square root scale to give the image more
     contrast. The PNG data is returned in a BytesIO object."""
     matplotlib.use("agg")
-    sky_image_data = io.fits.getdata(sky_image, ext=0)
+    sky_image_data = numpy.sqrt(io.fits.getdata(sky_image, ext=0))
     detector_image_data = numpy.sqrt(io.fits.getdata(detector_image, ext=0))
     figure, (sky_image_plot, detector_image_plot) = pyplot.subplots(nrows=1, ncols=2)
     figure.set_figwidth(10)
@@ -62,7 +62,7 @@ def plot_postagestamps(sky_image, detector_image):
         sky_image_plot.get_xlim(),
     )
     sky_image_plot.set_xticks(*sky_x_ticks, rotation=90)
-    detector_image_plot.set_title("Detector-Coordinates Postage Stamp (sqrt Scale)", y=1.05)
+    detector_image_plot.set_title("Detector-Coordinates Postage Stamp", y=1.05)
     detector_image_plot.set_xlabel("Detector-Coordinates X Pixel")
     detector_image_plot.set_ylabel("Detector-Coordinates Y Pixel")
     detector_image_plot.grid(True, linestyle="-", color="gray")
@@ -88,7 +88,8 @@ def plot_postagestamps(sky_image, detector_image):
     return png_data
 
 
-class CropBounds(NamedTuple):
+@dataclass
+class CropBounds:
     """Holds the bounding box of our postage stamp images."""
 
     x_min: float
@@ -96,18 +97,27 @@ class CropBounds(NamedTuple):
     x_max: float
     y_max: float
 
-    @classmethod
-    def from_source_region_bounds(cls, x_min, y_min, x_max, y_max):
-        """Gives the image some padding so the background region can be observed. This should be
-        immune to edge cases where the source region plus padding exceeds the dimensions of the
-        whole image."""
-        padding = 20  # In chandra pixels
-        return cls(
-            float(x_min) - padding,
-            float(y_min) - padding,
-            float(x_max) + padding,
-            float(y_max) + padding,
+    def double(self):
+        """Double the bounds, useful for including background in the image."""
+        x_range = self.x_max - self.x_min
+        self.x_min -= x_range
+        self.x_max += x_range
+        y_range = self.y_max - self.y_min
+        self.y_min -= y_range
+        self.y_max += y_range
+
+    def to_hdu(self):
+        """Convert the dataclass to a Header Data Unit for FITS files."""
+        hdu = io.fits.table_to_hdu(
+            table.Table({field.name: [(getattr(self, field.name))] for field in fields(self)})
         )
+        hdu.header["EXTNAME"] = "BOUNDS"
+        return hdu
+
+    @classmethod
+    def from_strings(cls, x_min, y_min, x_max, y_max):
+        """Casts a set of string values to floats."""
+        return cls(float(x_min), float(y_min), float(x_max), float(y_max))
 
     @classmethod
     def from_hdu_list(cls, hdu_list):

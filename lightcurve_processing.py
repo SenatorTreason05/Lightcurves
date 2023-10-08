@@ -97,17 +97,9 @@ class ObservationProcessor(ABC):
         dealing with hundreds of thousands of blank pixels. The cropping bounds are written to the
         FITS file for later use in plotting."""
 
-        def convert_bounds_object_to_hdu(bounds: CropBounds):
-            hdu = io.fits.table_to_hdu(
-                table.Table({field: [(getattr(bounds, field))] for field in bounds._fields})
-            )
-            hdu.header["EXTNAME"] = "BOUNDS"
-            return hdu
-
         dmstat(infile=f"{region_event_list}[cols x,y]")
-        sky_bounds = CropBounds.from_source_region_bounds(
-            *dmstat.out_min.split(","), *dmstat.out_max.split(",")
-        )
+        sky_bounds = CropBounds.from_strings(*dmstat.out_min.split(","), *dmstat.out_max.split(","))
+        sky_bounds.double()
         dmcopy(
             infile=f"{self.event_list}"
             f"[bin x={sky_bounds.x_min}:{sky_bounds.x_max}:0.5,"
@@ -115,10 +107,10 @@ class ObservationProcessor(ABC):
             outfile=(sky_coords_image := f"{region_event_list}.skyimg.fits"),
         )
         with io.fits.open(sky_coords_image, mode="append") as hdu_list:
-            hdu_list.append(convert_bounds_object_to_hdu(sky_bounds))
-        dmstat(infile=f"{region_event_list}[cols detx,dety]")
+            hdu_list.append(sky_bounds.to_hdu())
 
-        detector_bounds = CropBounds.from_source_region_bounds(
+        dmstat(infile=f"{region_event_list}[cols detx,dety]")
+        detector_bounds = CropBounds.from_strings(
             *dmstat.out_min.split(","), *dmstat.out_max.split(",")
         )
         dmcopy(
@@ -128,7 +120,7 @@ class ObservationProcessor(ABC):
             outfile=(detector_coords_image := f"{region_event_list}.detimg.fits"),
         )
         with io.fits.open(detector_coords_image, mode="append") as hdu_list:
-            hdu_list.append(convert_bounds_object_to_hdu(detector_bounds))
+            hdu_list.append(detector_bounds.to_hdu())
         self.sky_coords_image, self.detector_coords_image = sky_coords_image, detector_coords_image
 
     def get_observation_details(self):
