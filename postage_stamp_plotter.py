@@ -33,11 +33,13 @@ def get_real_ticks_from_real_bounds(real_bounds, image_bounds, tick_interval=5):
 def plot_postagestamps(sky_image, detector_image):
     """Plots the binned sky and detector images which are read as NumPy arrays by astropy. Requires
     the FITS images to have a 'BOUNDS' extension where min and max limits are stored in a binary
-    table (BINTABLE). The detector image is done on a square root scale to give the image more
-    contrast. The PNG data is returned in a BytesIO object."""
+    table (BINTABLE). The images are on a square root scale and inverted for visibility purposes.
+    The PNG data is returned in a BytesIO object."""
+    if sky_image is None or detector_image is None:
+        return None
     matplotlib.use("agg")
-    sky_image_data = numpy.sqrt(io.fits.getdata(sky_image, ext=0))
-    detector_image_data = numpy.sqrt(io.fits.getdata(detector_image, ext=0))
+    sky_image_data = 255 - numpy.sqrt(io.fits.getdata(sky_image, ext=0))
+    detector_image_data = 255 - numpy.sqrt(io.fits.getdata(detector_image, ext=0))
     figure, (sky_image_plot, detector_image_plot) = pyplot.subplots(nrows=1, ncols=2)
     figure.set_figwidth(10)
 
@@ -99,12 +101,14 @@ class CropBounds:
 
     def double(self):
         """Double the bounds, useful for including background in the image."""
-        x_range = self.x_max - self.x_min
-        self.x_min -= x_range
-        self.x_max += x_range
-        y_range = self.y_max - self.y_min
-        self.y_min -= y_range
-        self.y_max += y_range
+        self.add_padding(self.x_max - self.x_min, self.y_max - self.y_min)
+
+    def add_padding(self, x_padding, y_padding):
+        """Add padding to the image in pixels, for extending it past tight bounds."""
+        self.x_min -= x_padding
+        self.x_max += x_padding
+        self.y_min -= y_padding
+        self.y_max += y_padding
 
     def to_hdu(self):
         """Convert the dataclass to a Header Data Unit for FITS files."""
