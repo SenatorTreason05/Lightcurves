@@ -19,13 +19,13 @@ from postage_stamp_plotter import CropBounds, plot_postagestamps
 class ObservationProcessor(ABC):
     """Base class for observation processor implementations for different Chandra instruments."""
 
-    def __init__(self, data_products, message_collection_queue, counts_checker, config):
+    def __init__(self, data_products, binsize, message_collection_queue=None, counts_checker=None):
         self.event_list = Path(data_products.event_list_file)
         self.source_region = Path(data_products.source_region_file)
         self.detector_coords_image, self.sky_coords_image = None, None
         self.message_collection_queue = message_collection_queue
         self.counts_checker = counts_checker
-        self.binsize = config["Binsize"]
+        self.binsize = binsize
 
     def process(self):
         """Sequence in which all steps of the processing routine are called."""
@@ -43,7 +43,7 @@ class ObservationProcessor(ABC):
             status("Extracting lightcurves...")
             lightcurves = self.extract_lightcurves(region_event_list, self.binsize)
             status("Copying columns...")
-            filtered_lightcurves = self.export_lightcurve_columns(lightcurves)
+            filtered_lightcurves = self.filter_lightcurve_columns(lightcurves)
             status("Checking counts...")
             lightcurve_data = self.get_lightcurve_data(filtered_lightcurves)
             self.counts_checker.queue.put(self.get_lightcurve_counts(lightcurve_data))
@@ -53,10 +53,10 @@ class ObservationProcessor(ABC):
             status("Retrieving images...")
             self.get_images(region_event_list)
             status("Plotting lightcurves...")
-            parse_results = self.plot(lightcurve_data)
+            results = self.plot(lightcurve_data)
             status("Plotting lightcurves... Done")
 
-        return parse_results
+        return results
 
     @staticmethod
     @abstractmethod
@@ -66,7 +66,7 @@ class ObservationProcessor(ABC):
 
     @staticmethod
     @abstractmethod
-    def export_lightcurve_columns(lightcurves: list[Path]):
+    def filter_lightcurve_columns(lightcurves: list[Path]):
         """Filter lightcurve(s) to get the columns we care about and format them."""
 
     @staticmethod
@@ -80,13 +80,14 @@ class ObservationProcessor(ABC):
 
     @abstractmethod
     def plot(self, lightcurve_data) -> LightcurveParseResults:
-        """Parse lightcurve(s). Returns what will then be returned by the thread pool future."""
+        """Plots lightcurve(s). Returns what will then be returned by the thread pool future."""
 
     @staticmethod
     def isolate_source_region(event_list: Path, source_region):
         dmcopy(
             infile=f"{event_list}[sky=region({source_region})]",
             outfile=(outfile := f"{event_list.with_suffix('.src.fits')}"),
+            clobber="yes",
         )
         return outfile
 
@@ -113,6 +114,7 @@ class ObservationProcessor(ABC):
         detector_bounds = CropBounds.from_strings(
             *dmstat.out_min.split(","), *dmstat.out_max.split(",")
         )
+        detector_bounds.add_padding(x_padding=5, y_padding=5)
         dmcopy(
             infile=f"{self.event_list}"
             f"[bin detx={detector_bounds.x_min}:{detector_bounds.x_max}:0.5,"
@@ -161,12 +163,13 @@ class AcisProcessor(ObservationProcessor):
                 f"{AcisProcessor.adjust_binsize(event_list, binsize)}]",
                 outfile=(outfile := f"{event_list}.{light_level}.lc"),
                 opt="ltc1",
+                clobber="yes",
             )
             outfiles.append(Path(outfile))
         return outfiles
 
     @staticmethod
-    def export_lightcurve_columns(lightcurves):
+    def filter_lightcurve_columns(lightcurves):
         outfiles = []
         for lightcurve in lightcurves:
             dmlist(
@@ -209,14 +212,14 @@ class AcisProcessor(ObservationProcessor):
             observation_header_info=self.get_observation_details(),
             observation_data=observation_data,
             plot_csv_data=output_plot_data,
-            plot_svg_data=self.create_plot(lightcurve_data),
+            plot_svg_data=self.create_plot(lightcurve_data, self.binsize),
             postagestamp_png_data=plot_postagestamps(
                 self.sky_coords_image, self.detector_coords_image
             ),
         )
 
     @staticmethod
-    def create_plot(lightcurve_data: dict[str, DataFrame]):
+    def create_plot(lightcurve_data: dict[str, DataFrame], binsize):
         """Generate a pyplot plot to model the lightcurves."""
         matplotlib.use("svg")
         initial_time = lightcurve_data["broad"]["TIME"].min()
@@ -256,7 +259,9 @@ class AcisProcessor(ObservationProcessor):
         seperation_plot.set_xlim([0, observation_duration])
         figure.supylabel("Count Rate (counts/second)")
         figure.supxlabel("Time (kiloseconds)")
-        figure.suptitle("Lightcurve in Broadband and Separated Energy Bands")
+        figure.suptitle(
+            f"Lightcurve in Broadband and Separated Energy Bands (Binsize of {binsize}s)"
+        )
         pyplot.savefig(svg_data := StringIO(), bbox_inches="tight")
         pyplot.close(figure)
         return svg_data
@@ -271,7 +276,7 @@ class HrcProcessor(ObservationProcessor):
         raise NotImplementedError()
 
     @staticmethod
-    def export_lightcurve_columns(lightcurves):
+    def filter_lightcurve_columns(lightcurves):
         raise NotImplementedError()
 
     @staticmethod

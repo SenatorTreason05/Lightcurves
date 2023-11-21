@@ -170,8 +170,9 @@ class LightcurveGenerator:
         (Advanced CCD Imaging Spectrometer) or HRC (High Resolution Camera)"""
         data_products = DataProducts(event_list_file, source_region_file)
         acis_pattern, hrc_pattern = r"^acis", r"^hrc"
+        binsize = config["Binsize"]
         if re.match(acis_pattern, data_products.event_list_file.name):
-            return AcisProcessor(data_products, message_collection, counts_checker, config)
+            return AcisProcessor(data_products, binsize, message_collection, counts_checker)
         if re.match(hrc_pattern, data_products.event_list_file.name):
-            return HrcProcessor(data_products, message_collection, counts_checker, config)
+            return HrcProcessor(data_products, binsize, message_collection, counts_checker)
         raise RuntimeError("Unable to resolve observation instrument")

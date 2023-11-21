@@ -10,7 +10,7 @@ from data_structures import LightcurveParseResults, ExportableObservationData
 class Exporter:
     """Exports source and observation data to output documents."""
 
-    def __init__(self, config, source_count):
+    def __init__(self, config, source_count=0):
         self.config = config
         self.source_count = source_count
         self.output_directory = (
@@ -32,10 +32,7 @@ class Exporter:
             plot_directory = self.output_directory / "plots" / source_name
             plot_directory.mkdir(parents=True, exist_ok=True)
             observation_id = observation.observation_header_info.observation_id
-            combined_observation_data = {
-                **observation.observation_header_info._asdict(),
-                **observation.observation_data._asdict(),
-            }
+            combined_observation_data = self.combine_observation_data(observation)
             source_data.append(
                 ExportableObservationData(
                     columns={
@@ -54,6 +51,14 @@ class Exporter:
                 )
             )
         self.master_data[source_name] = source_data
+
+    @staticmethod
+    def combine_observation_data(observation: LightcurveParseResults):
+        """Amalgamate all observation data that we want to display."""
+        return {
+            **observation.observation_header_info._asdict(),
+            **observation.observation_data._asdict(),
+        }
 
     def write_plot_image(self, plot_directory, observation_id, svg_data, csv_data):
         """Write the plot svg image to disk and remove it from memory."""
@@ -85,7 +90,9 @@ class Exporter:
 
     def export(self):
         """Write all master data contents to an HTML file."""
-        with open(self.output_directory / "index.html", mode="a", encoding="utf-8") as file:
+        with open(
+            output := self.output_directory / "index.html", mode="a", encoding="utf-8"
+        ) as file:
             environment = Environment(loader=FileSystemLoader("./"))
             template = environment.get_template(str("/output_template.jinja"))
             content = template.render(
@@ -97,3 +104,4 @@ class Exporter:
                 master_data=self.master_data,
             )
             file.write(content)
+        return output

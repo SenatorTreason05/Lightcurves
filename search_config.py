@@ -115,7 +115,7 @@ class SearchConfigGUI:
         self.cleanup_function()
 
 
-def get_config():
+def get_config(use_gui=False):
     """Writes, reads, and returns the config file."""
     with open(file=CONFIG_FILE_PATH, mode="a", encoding="utf-8"):
         # Creates file if it does not exist.
@@ -127,6 +127,8 @@ def get_config():
         except ScannerError:
             print("Config file corrupted.")
             config = {}
+        if not use_gui:
+            return config
         with SearchConfigGUI(config) as config_gui:
             file.seek(0)
             finalized_config = config_gui.finalize_config()

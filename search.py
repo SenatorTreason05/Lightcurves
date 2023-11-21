@@ -34,11 +34,12 @@ class SourceManager:
     tasks in parallel and logging."""
 
     def __init__(self, config):
-        self.config = config
+        SourceManager.config = config
         self.sources = []
         self.downloaded_source_queue: Queue[Path] = None
         self.download_message_queue, self.process_message_queue = Queue(), Queue()
         self.sources_downloaded, self.sources_processed = 0, 0
+        self.output_html_file = None
 
     def search_csc(self):
         """Queries the Chandra Source Catalog for sources matching the search criteria."""
@@ -165,7 +166,7 @@ class SourceManager:
             process_error_event.set()
             raise
         self.process_message_queue.put(None)
-        lightcurve_generator.exporter.export()
+        self.output_html_file = lightcurve_generator.exporter.export()
 
     def download_and_process(self):
         """Manages the threads and queues that do the downloading, processing, and terminal output.
@@ -193,6 +194,7 @@ class SourceManager:
         if outputting:
             self.download_message_queue.join()
             self.process_message_queue.join()
+        return self.output_html_file
 
 
 class Terminal:

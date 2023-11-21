@@ -65,6 +65,13 @@
       max-height: 600px;
     }
   </style>
+  <script>
+    document.addEventListener("click", (event) => {
+      if (event.target.tagName === "BUTTON") {
+        alert("This page is not running on the server.")
+      }
+    });
+  </script>
 </head>
 
 <body>
@@ -108,36 +115,44 @@
 
 
   {% for source_name, source_data in master_data.items() %}
-  <tr>
-    <h2>{{ source_name }}</h2>
-  </tr>
+  <h2>{{ source_name }}</h2>
   {% if not source_data %}
   <p>No data, either invalid or unsupported.</p>
   {% endif %}
   <table>
     {% for observation in source_data %}
-    <tr id="{{ source_name + '/' + observation.columns['Observation Id'] }}">
-      {% for column in observation.columns.keys() %}
-      <th>{{ column }}</th>
-      {% endfor %}
-    </tr>
-    <tr>
-      {% for value in observation.columns.values() %}
-      <td>{{ value }}</td>
-      {% endfor %}
-    </tr>
-    {% set full_colspan = observation.columns.keys().__len__() %}
-    <tr>
-      <td colspan="{{ full_colspan }}">
-        <img src="{{ observation.plot_image_path }}" alt="Image not found" loading="lazy" />
-      </td>
-    </tr>
-    <tr>
-      <td colspan="{{ full_colspan }}">
-        <img class="postage-stamp-image" src="{{ observation.postage_stamp_image_path }}" alt="Image not found"
-          loading="lazy" />
-      </td>
-    </tr>
+    <tbody id="{{ source_name + '/' + observation.columns['Observation Id'] }}">
+      <tr class="table-header-row">
+        {% for column in observation.columns.keys() %}
+        <th>{{ column }}</th>
+        {% endfor %}
+      </tr>
+      <tr class="table-data-row">
+        {% for value in observation.columns.values() %}
+        <td>{{ value }}</td>
+        {% endfor %}
+      </tr>
+      <tr>
+        <td>
+          Binsize: <input class="new-binsize-field" type="number" />
+          <button class="binsize-recalculation-button" type="button">Recalculate</button>
+        </td>
+        <td class="status-display">Idle</td>
+      </tr>
+      {% set full_colspan = observation.columns.keys().__len__() %}
+      <tr>
+        <td colspan="{{ full_colspan }}">
+          <img class="lightcurve-plot-image" src="{{ observation.plot_image_path }}" alt="Image not found"
+            loading="lazy" />
+        </td>
+      </tr>
+      <tr>
+        <td colspan="{{ full_colspan }}">
+          <img class="postage-stamp-image" src="{{ observation.postage_stamp_image_path }}" alt="Image not found"
+            loading="lazy" />
+        </td>
+      </tr>
+    </tbody>
     {% endfor %}
   </table>
   {% endfor %}
