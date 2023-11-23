@@ -1,13 +1,12 @@
 <!--Mihir Patankar [mpatankar06@gmail.com]-->
+<!-- <!DOCTYPE html> TODO find out why this breaks formatting -->
 <html>
 
 <head>
   <title>Light Curves</title>
   <style>
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
+      font-family: 'Roboto', sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -37,6 +36,16 @@
       padding: 15px;
     }
 
+    span {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    textarea {
+      resize: none;
+    }
+
     .table-of-contents {
       font-size: 2vmin;
       border: 1px dashed;
@@ -55,6 +64,12 @@
     .source-list,
     .source-list .observation-list {
       list-style: decimal-leading-zero;
+    }
+
+    .binsize-recalculation-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-evenly;
     }
 
     .source-list>li {
@@ -132,14 +147,19 @@
         <td>{{ value }}</td>
         {% endfor %}
       </tr>
-      <tr>
-        <td>
-          Binsize: <input class="new-binsize-field" type="number" />
-          <button class="binsize-recalculation-button" type="button">Recalculate</button>
-        </td>
-        <td class="status-display">Idle</td>
-      </tr>
       {% set full_colspan = observation.columns.keys().__len__() %}
+      <tr>
+        <td colspan="{{ full_colspan }}">
+          <div class="binsize-recalculation-container">
+            <span>Binsize: <input class="new-binsize-field" type="number" /> <button
+                class="binsize-recalculation-button" type="button">Recalculate</button>
+            </span>
+            <span>
+              Status: <textarea class="status-display" rows="1" cols="30" readonly>Idle</textarea>
+            </span>
+          </div>
+        </td>
+      </tr>
       <tr>
         <td colspan="{{ full_colspan }}">
           <img class="lightcurve-plot-image" src="{{ observation.plot_image_path }}" alt="Image not found"

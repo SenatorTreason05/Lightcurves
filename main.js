@@ -20,9 +20,9 @@ const modifyObservationRows = (observationRows, responseData) => {
   lightcurvePlotImage.src = responseData.newPlotPath;
 };
 
-const updateStatusCell = (observationRows, message) => {
-  const statusCell = observationRows.querySelector("td.status-display");
-  statusCell.textContent = message;
+const updateStatusText = (observationRows, message) => {
+  const statusCell = observationRows.querySelector("textarea.status-display");
+  statusCell.value = message;
 };
 
 const handleResponse = (response) => {
@@ -40,7 +40,7 @@ document.addEventListener("click", (event) => {
     const observationRows = event.target.closest("tbody");
     const eventSource = new EventSource("/rebinning_status");
     eventSource.onmessage = (event) => {
-      updateStatusCell(observationRows, event.data);
+      updateStatusText(observationRows, event.data);
     };
     console.log("Making request to server...");
     fetch("/recalculate", {
