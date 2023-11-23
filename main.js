@@ -1,10 +1,8 @@
-const createRequestBody = (observationRows) => {
+const createRequestBody = (observationRows, newBinsize) => {
   const dataRow = observationRows.querySelector("tr.table-data-row");
   const [sourceName, observationID] = observationRows.id.split("/");
   const instrument = dataRow.firstElementChild.textContent;
-  const newBinsize = observationRows.querySelector(
-    "input.new-binsize-field"
-  ).value;
+
   return { sourceName, observationID, instrument, newBinsize };
 };
 
@@ -38,6 +36,12 @@ const handleResponse = (response) => {
 document.addEventListener("click", (event) => {
   if (event.target.classList.contains("binsize-recalculation-button")) {
     const observationRows = event.target.closest("tbody");
+    const newBinsize = observationRows.querySelector(
+      "input.new-binsize-field"
+    ).value;
+    if (newBinsize === "") {
+      return;
+    }
     const eventSource = new EventSource("/rebinning_status");
     eventSource.onmessage = (event) => {
       updateStatusText(observationRows, event.data);
@@ -48,7 +52,7 @@ document.addEventListener("click", (event) => {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(createRequestBody(observationRows)),
+      body: JSON.stringify(createRequestBody(observationRows, newBinsize)),
     })
       .then((response) => handleResponse(response))
       .then((newData) => modifyObservationRows(observationRows, newData))
