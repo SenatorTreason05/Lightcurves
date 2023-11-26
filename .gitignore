@@ -163,6 +163,5 @@ cython_debug/
 data/
 logs/
 output/
-old_program/
 *.tsv
 config.yaml
