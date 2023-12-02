@@ -58,9 +58,8 @@ class ObservationProcessor(ABC):
 
         return results
 
-    @staticmethod
     @abstractmethod
-    def extract_lightcurves(event_list, binsize):
+    def extract_lightcurves(self, event_list, binsize):
         """Extract lightcurve(s) from an event list, one should pass in one with a specific source
         region extracted."""
 
@@ -84,6 +83,7 @@ class ObservationProcessor(ABC):
 
     @staticmethod
     def isolate_source_region(event_list: Path, source_region):
+        """Restrict the event list to just the source region of the source we care about."""
         dmcopy(
             infile=f"{event_list}[sky=region({source_region})]",
             outfile=(outfile := f"{event_list.with_suffix('.src.fits')}"),
@@ -149,18 +149,17 @@ class AcisProcessor(ObservationProcessor):
 
     @staticmethod
     def adjust_binsize(event_list, binsize):
-        """For ACIS, time resolution can be in the seconds in timed exposure mode, as compared to in the microseconds for HRC."""
-        # TODO https://cxc.cfa.harvard.edu/ciao/ahelp/times.html find out the difference between interleaved and standard TIME mode
+        """For ACIS, time resolution can be in the seconds in timed exposure mode, as compared to in
+        the microseconds for HRC. Thus we must round the binsize to the time resolution."""
         time_resolution = float(dmkeypar(infile=str(event_list), keyword="TIMEDEL", echo=True))
         return binsize // time_resolution * time_resolution
 
-    @staticmethod
-    def extract_lightcurves(event_list, binsize):
+    def extract_lightcurves(self, event_list, binsize):
         outfiles = []
+        self.binsize = self.adjust_binsize(event_list, binsize)
         for light_level, energy_range in AcisProcessor.ENERGY_LEVELS.items():
             dmextract(
-                infile=f"{event_list}[{energy_range}][bin time=::"
-                f"{AcisProcessor.adjust_binsize(event_list, binsize)}]",
+                infile=f"{event_list}[{energy_range}][bin time=::" f"{self.binsize}]",
                 outfile=(outfile := f"{event_list}.{light_level}.lc"),
                 opt="ltc1",
                 clobber="yes",
@@ -271,8 +270,7 @@ class HrcProcessor(ObservationProcessor):
     """Processes for observations produced by the HRC (High Resolution Camera) instrument aboard
     Chandra."""
 
-    @staticmethod
-    def extract_lightcurves(event_list, binsize):
+    def extract_lightcurves(self, event_list, binsize):
         raise NotImplementedError()
 
     @staticmethod
