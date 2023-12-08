@@ -8,12 +8,12 @@ const createRequestBody = (observationRows, newBinsize) => {
 
 const modifyObservationRows = (observationRows, responseData) => {
   const dataRow = observationRows.querySelector("tr.table-data-row");
-  const dataCells = dataRow.getElementsByTagName("td");
+  const dataColumn = dataRow.getElementsByTagName("td");
   const lightcurvePlotImage = observationRows.querySelector(
     "img.lightcurve-plot-image"
   );
-  for (const i in dataCells) {
-    dataCells[i].textContent = responseData.newData[i];
+  for (const column in dataColumn) {
+    dataColumn[column].textContent = responseData.newData[column];
   }
   lightcurvePlotImage.src = responseData.newPlotPath;
 };
@@ -26,9 +26,9 @@ const updateStatusText = (observationRows, message) => {
 const handleResponse = (response) => {
   if (!response.ok) {
     if (response.status === 400) {
-      throw new Error("Invalid binsize inputted."); // TODO display this in the status
+      throw new Error("Invalid binsize inputted.");
     }
-    throw new Error("Server error.");
+    throw new Error("Unspecified server error.");
   }
   return response.json();
 };

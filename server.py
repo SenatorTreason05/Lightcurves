@@ -48,7 +48,7 @@ def start(html_index_file: Path):
             if status_message is None:
                 break
             yield f"data: {status_message}\n\n"
-            time.sleep(0.1)
+            time.sleep(0.05)
 
     @app.route("/rebinning_status")
     def rebinning_status():
@@ -130,3 +130,15 @@ def reprocess_source(observation_directory, instrument, new_binsize):
     filtered_lightcurves = processor.filter_lightcurve_columns(lightcurves)
     lightcurve_data = processor.get_lightcurve_data(filtered_lightcurves)
     return processor.plot(lightcurve_data)
+
+
+def main():
+    """Main method for use when running the server seperately"""
+    html_index_file = input(
+        "Provide the absolute path of the html index file from the output you want to be hosted: "
+    )
+    start(Path(html_index_file))
+
+
+if __name__ == "__main__":
+    main()
