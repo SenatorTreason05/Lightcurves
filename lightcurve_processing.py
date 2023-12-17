@@ -240,7 +240,7 @@ class AcisProcessor(ObservationProcessor):
             capsize=3,
         )
         broad_plot.set_xlim([0, observation_duration])
-        seperated_light_level_colors = {"soft": "lightsalmon", "medium": "red", "hard": "firebrick"}
+        seperated_light_level_colors = {"soft": "red", "medium": "gold", "hard": "blue"}
         for light_level, color in seperated_light_level_colors.items():
             seperation_plot.plot(
                 zero_shifted_time_kiloseconds,
