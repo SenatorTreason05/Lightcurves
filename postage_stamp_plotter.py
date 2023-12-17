@@ -7,6 +7,8 @@ import numpy
 from astropy import io, table
 from matplotlib import pyplot
 
+ACIS_PIXELS_PER_ARCSECOND = 0.492
+
 
 def get_real_ticks_from_real_bounds(real_bounds, image_bounds, tick_interval=5):
     """We cannot use matplotlib.ticker since image pixels and physical pixels have a proportional
@@ -64,6 +66,19 @@ def plot_postagestamps(sky_image, detector_image):
         sky_image_plot.get_xlim(),
     )
     sky_image_plot.set_xticks(*sky_x_ticks, rotation=90)
+
+    scale_x_anchor = sky_image_data.shape[1] - 1
+    scale_y_anchor = 1
+    sky_image_plot.plot(
+        [scale_x_anchor, scale_x_anchor + ACIS_PIXELS_PER_ARCSECOND],
+        [scale_y_anchor, scale_y_anchor],
+        color="red",
+        linewidth=2,
+    )
+    sky_image_plot.text(
+        scale_x_anchor, scale_y_anchor, "1 arcsec ", color="red", ha="right", va="center"
+    )
+
     detector_image_plot.set_title("Detector-Coordinates Postage Stamp", y=1.05)
     detector_image_plot.set_xlabel("Detector-Coordinates X Pixel")
     detector_image_plot.set_ylabel("Detector-Coordinates Y Pixel")
