@@ -44,6 +44,7 @@ class SearchConfigGUI:
             ConfigField(Label(window, text="Output Directory"), Entry(window), "./output", str),
             ConfigField(Label(window, text="Log Directory"), Entry(window), "./logs", str),
             ConfigField(Label(window, text="Enable Output"), Checkbutton(window), True, bool),
+            ConfigField(Label(window, text="Auto Start Server"), Checkbutton(window), False, bool),
         ]
 
         self.populate_form_fields()
