@@ -56,8 +56,7 @@ class LightcurveGenerator:
 
         transfer_thread = Thread(target=transfer_queues)
         transfer_thread.start()
-
-        with futures.ProcessPoolExecutor(max_workers=14) as executor:
+        with futures.ProcessPoolExecutor(max_workers=30) as executor:
             while True:
                 source_directory = source_queue.get()
                 if not source_directory:
@@ -130,7 +129,6 @@ class LightcurveGenerator:
             time.sleep(0.1)
 
     def assign_workers(self, observation_directories, message_collection_queue, counts_check_queue):
-        """Map processors to observation directories."""
         __ = [
             self.get_instrument_processor(
                 *self.get_observation_files(observation_directory),
@@ -142,10 +140,12 @@ class LightcurveGenerator:
         ]
 
         # Temp code!
+        # will change when i finish hrcprocessor
         for _ in __:
             if isinstance(_, HrcProcessor):
                 __.remove(_)
         return __
+
 
     @staticmethod
     def get_observation_files(observation_directory: Path):

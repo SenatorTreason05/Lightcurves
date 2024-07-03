@@ -3,13 +3,20 @@ import uuid
 from abc import ABC, abstractmethod
 from io import StringIO
 from pathlib import Path
+import threading
+
+import numpy as np
 
 import matplotlib
+from matplotlib.ticker import MultipleLocator, AutoMinorLocator
 from astropy import io, table
+from astropy.timeseries import LombScargle
+from astropy.stats import bayesian_blocks
+from astropy.time import Time
 
 # pylint: disable-next=no-name-in-module
 from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, new_pfiles_environment
-from matplotlib import pyplot
+from matplotlib import pyplot as plt
 from pandas import DataFrame
 
 from data_structures import LightcurveParseResults, Message, ObservationData, ObservationHeaderInfo
@@ -44,12 +51,38 @@ class ObservationProcessor(ABC):
             lightcurves = self.extract_lightcurves(region_event_list, self.binsize)
             status("Copying columns...")
             filtered_lightcurves = self.filter_lightcurve_columns(lightcurves)
+
             status("Checking counts...")
             lightcurve_data = self.get_lightcurve_data(filtered_lightcurves)
             self.counts_checker.queue.put(self.get_lightcurve_counts(lightcurve_data))
             self.counts_checker.queue.join()
             if self.counts_checker.cancel_event.is_set():
                 return None
+            
+            # status("Checking counts...")
+            # lightcurve_data = self.get_lightcurve_data(filtered_lightcurves)
+            # # Function to check counts
+            # def check_counts():
+            #     self.counts_checker.queue.put(self.get_lightcurve_counts(lightcurve_data))
+            #     self.counts_checker.queue.join()
+
+            # # Create and start the counts checking thread
+            # counts_thread = threading.Thread(target=check_counts)
+            # counts_thread.start()
+
+            # # Wait for up to 10 seconds for the counts checking to complete
+            # counts_thread.join(timeout=30)
+
+            # # Check if the thread is still running after the timeout
+            # if counts_thread.is_alive():
+            #     status("Counts checking exceeded 30 seconds. Cancelling operation.")
+            #     self.counts_checker.cancel_event.set()
+            #     return None
+
+            # # Check if the cancel event was set by the counts checker
+            # if self.counts_checker.cancel_event.is_set():
+            #     return None
+
             status("Retrieving images...")
             self.get_images(region_event_list)
             status("Plotting lightcurves...")
@@ -141,7 +174,8 @@ class AcisProcessor(ObservationProcessor):
     aboard Chandra."""
 
     ENERGY_LEVELS = {
-        "broad": "energy=300:7000",
+        "broad": "energy=150:7000",
+        "ultrasoft": "energy=150:300",
         "soft": "energy=300:1200",
         "medium": "energy=1200:2000",
         "hard": "energy=2000:7000",
@@ -193,9 +227,53 @@ class AcisProcessor(ObservationProcessor):
             ]
         return lightcurve_data
 
+    # def get_lightcurve_data(lightcurves: list[Path]):
+    #     lightcurve_data: dict[str, DataFrame] = {}
+    #     for energy_level, lightcurve in zip(AcisProcessor.ENERGY_LEVELS.keys(), lightcurves):
+    #         try:
+    #             # Attempt to read the file and convert to pandas DataFrame
+    #             table_data = table.Table.read(lightcurve, format="ascii")
+    #             lightcurve_dataframe = table_data.to_pandas()
+    #             # Ensure the DataFrame has an "EXPOSURE" column
+    #             if "EXPOSURE" in lightcurve_dataframe.columns:
+    #                 # Filter out rows with zero exposure
+    #                 lightcurve_data[energy_level] = lightcurve_dataframe[lightcurve_dataframe["EXPOSURE"] != 0]
+    #             else:
+    #                 print(f"Warning: 'EXPOSURE' column not found in {lightcurve}")
+    #         except FileNotFoundError:
+    #             print(f"Error: File {lightcurve} not found.")
+    #             continue
+    #         except Exception as e:
+    #             print(f"Error processing {lightcurve}: {e}")
+    #             continue
+    #     return lightcurve_data
+
     @staticmethod
     def get_lightcurve_counts(lightcurve_data):
         return int(lightcurve_data["broad"]["COUNTS"].sum())
+
+    @staticmethod
+    def create_csv(lightcurve_data):
+        """Create CSV with columns for each energy level."""
+        combined_data = DataFrame({
+            "time": lightcurve_data["broad"]["TIME"],
+            "count_rate": lightcurve_data["broad"]["COUNT_RATE"],
+            "counts": lightcurve_data["broad"]["COUNTS"],
+            "count_error": lightcurve_data["broad"]["COUNT_RATE_ERR"],
+            "ultrasoft_count_rate": lightcurve_data["ultrasoft"]["COUNT_RATE"],
+            "soft_count_rate": lightcurve_data["soft"]["COUNT_RATE"],
+            "medium_count_rate": lightcurve_data["medium"]["COUNT_RATE"],
+            "hard_count_rate": lightcurve_data["hard"]["COUNT_RATE"],
+            "ultrasoft_counts": lightcurve_data["ultrasoft"]["COUNTS"],
+            "soft_counts": lightcurve_data["soft"]["COUNTS"],
+            "medium_counts": lightcurve_data["medium"]["COUNTS"],
+            "hard_counts": lightcurve_data["hard"]["COUNTS"],
+            "exposure": lightcurve_data["broad"]["EXPOSURE"],
+            "area": lightcurve_data["broad"]["AREA"],
+        })
+        output_csv = StringIO()
+        combined_data.to_csv(output_csv, index=False)
+        return output_csv
 
     def plot(self, lightcurve_data):
         # The type casts are important as the data is returned by CIAO as NumPy data types.
@@ -206,11 +284,11 @@ class AcisProcessor(ObservationProcessor):
             raw_start_time=int(lightcurve_data["broad"]["TIME"].min()),
         )
         # This data is just so people can view the exact numerical data that was plotted.
-        output_plot_data = StringIO(lightcurve_data["broad"].to_string())
+        # output_plot_data = StringIO(lightcurve_data["broad"].to_string())
         return LightcurveParseResults(
             observation_header_info=self.get_observation_details(),
             observation_data=observation_data,
-            plot_csv_data=output_plot_data,
+            plot_csv_data= self.create_csv(lightcurve_data),
             plot_svg_data=self.create_plot(lightcurve_data, self.binsize),
             postagestamp_png_data=plot_postagestamps(
                 self.sky_coords_image, self.detector_coords_image
@@ -219,13 +297,18 @@ class AcisProcessor(ObservationProcessor):
 
     @staticmethod
     def create_plot(lightcurve_data: dict[str, DataFrame], binsize):
-        """Generate a pyplot plot to model the lightcurves."""
+        """Generate a plt plot to model the lightcurves."""
         matplotlib.use("svg")
-        initial_time = lightcurve_data["broad"]["TIME"].min()
+        chandra_mjd_ref = 50814.0
+        initial_time_seconds = lightcurve_data["broad"]["TIME"]
+        initial_time = initial_time_seconds.min()
+        initial_time_days = initial_time_seconds / 86400.0
+        observation_mjd = chandra_mjd_ref + initial_time_days
+        observation_date = Time(observation_mjd, format='mjd').to_datetime()
         zero_shifted_time_kiloseconds = (lightcurve_data["broad"]["TIME"] - initial_time) / 1000
         observation_duration = zero_shifted_time_kiloseconds.max()
-        figure, (broad_plot, seperation_plot) = pyplot.subplots(
-            nrows=2, ncols=1, figsize=(10, 5), constrained_layout=True, sharey=True
+        figure, (broad_plot, seperation_plot, counts_plot, hr_plot, lomb_scargle_plot, bayesian_blocks_plot) = plt.subplots(
+            nrows=6, ncols=1, figsize=(12, 18), constrained_layout=True
         )
         broad_plot.errorbar(
             x=zero_shifted_time_kiloseconds,
@@ -238,9 +321,20 @@ class AcisProcessor(ObservationProcessor):
             ecolor="black",
             markeredgecolor="black",
             capsize=3,
-        )
+        )        
         broad_plot.set_xlim([0, observation_duration])
-        seperated_light_level_colors = {"soft": "red", "medium": "gold", "hard": "blue"}
+        broad_plot.set_title("Broadband Count Rate", fontsize=14)
+        broad_plot.set_ylabel("Count Rate (counts/s)", fontsize=12)
+        broad_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        broad_plot.xaxis.set_major_locator(MultipleLocator(5))  
+        broad_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        broad_plot.tick_params(axis='both', which='major', labelsize=10)
+        broad_plot.text(0.95, 0.95, f"Start: {observation_date}",
+            transform=broad_plot.transAxes,
+            fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
+
+        seperated_light_level_colors = {"ultrasoft": "green", "soft": "red", "medium": "gold", "hard": "blue"}
+
         for light_level, color in seperated_light_level_colors.items():
             seperation_plot.plot(
                 zero_shifted_time_kiloseconds,
@@ -251,39 +345,322 @@ class AcisProcessor(ObservationProcessor):
         seperation_plot.legend(
             loc="upper center",
             bbox_to_anchor=(0.5, 1.05),
-            ncol=3,
+            ncol=4,
             frameon=False,
-            fontsize=14,
+            fontsize=12,
         )
         seperation_plot.set_xlim([0, observation_duration])
-        figure.supylabel("Count Rate (counts/second)")
-        figure.supxlabel("Time (kiloseconds)")
+        seperation_plot.set_title("Separated Energy Band Count Rates", fontsize=14)
+        seperation_plot.set_ylabel("Count Rate (counts/s)", fontsize=12)
+        seperation_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        seperation_plot.xaxis.set_major_locator(MultipleLocator(5))  
+        seperation_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        seperation_plot.tick_params(axis='both', which='major', labelsize=10)
+        
+
+        # Counts plot
+        counts_plot.plot(
+            zero_shifted_time_kiloseconds,
+            lightcurve_data["broad"]["COUNTS"],
+            color="purple",
+            label="Broadband Counts",
+            marker='o',
+            markersize=4,
+        )
+        counts_plot.set_xlim([0, observation_duration])
+        counts_plot.set_title("Counts in Broadband", fontsize=14)
+        counts_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
+        counts_plot.set_ylabel("Counts", fontsize=12)
+        counts_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        counts_plot.xaxis.set_major_locator(MultipleLocator(5))  
+        counts_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        counts_plot.tick_params(axis='both', which='major', labelsize=10)
+
+        # Calculate and plot hardness ratios
+        hard_counts = lightcurve_data["hard"]["COUNTS"]
+        soft_counts = lightcurve_data["soft"]["COUNTS"]
+        medium_counts = lightcurve_data["medium"]["COUNTS"]
+
+        total_counts_hs = soft_counts + hard_counts
+        hr_hs = (hard_counts - soft_counts) / total_counts_hs
+        total_counts_ms = soft_counts + medium_counts
+        hr_ms = (medium_counts - soft_counts) / total_counts_ms
+        total_counts_all = soft_counts + medium_counts + hard_counts
+        hr_new = (soft_counts - (medium_counts + hard_counts)) / total_counts_all
+
+        # Plot hardness ratios
+        hr_plot.plot(
+            zero_shifted_time_kiloseconds,
+            hr_hs,
+            color="blue",
+            label="HR_HS (H-S)/(H+S)",
+            marker='^',
+            markersize=4,
+        )
+
+        hr_plot.plot(
+            zero_shifted_time_kiloseconds,
+            hr_ms,
+            color="orange",
+            label="HR_MS (M-S)/(M+S)",
+            marker='v',
+            markersize=4,
+        )
+
+        hr_plot.plot(
+            zero_shifted_time_kiloseconds,
+            hr_new,
+            color="green",
+            label="HR_New (S-(M+H))/(S+M+H)",
+            marker='o',
+            markersize=4,
+        )
+
+        hr_plot.set_xlim([0, observation_duration])
+        hr_plot.set_title("Hardness Ratios", fontsize=14)
+        hr_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
+        hr_plot.set_ylabel("Hardness Ratio", fontsize=12)
+        hr_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        hr_plot.xaxis.set_major_locator(MultipleLocator(5))
+        hr_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        hr_plot.tick_params(axis='both', which='major', labelsize=10)
+        hr_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.05), ncol=2, frameon=False, fontsize=12)
+
+
+        counts_rate = lightcurve_data["broad"]["COUNTS"]
+        integer_counts = counts_rate.round().astype(int) 
+        frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
+        lomb_scargle_plot.plot(frequency, power, color='darkblue')
+        lomb_scargle_plot.set_title("Lomb-Scargle Periodogram", fontsize=14)
+        lomb_scargle_plot.set_xlabel("Frequency (1/sec)", fontsize=12)
+        lomb_scargle_plot.set_ylabel("Power", fontsize=12)
+        lomb_scargle_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        lomb_scargle_plot.xaxis.set_major_locator(MultipleLocator(0.0001))
+        lomb_scargle_plot.xaxis.set_minor_locator(MultipleLocator(0.00002))
+        lomb_scargle_plot.tick_params(axis='both', which='major', labelsize=10)
+
+        
+        # bins = bayesian_blocks(zero_shifted_time_kiloseconds, integer_counts, fitness='events')
+        # bayesian_blocks_plot.hist(zero_shifted_time_kiloseconds, bins=bins, color='lightblue', edgecolor='black', alpha=0.7)
+        # bayesian_blocks_plot.set_title("Bayesian Blocks Segmentation", fontsize=14)
+        # bayesian_blocks_plot.set_xlabel("Time (seconds)", fontsize=12)
+        # bayesian_blocks_plot.set_ylabel("Counts Rate", fontsize=12)
+        # bayesian_blocks_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        # bayesian_blocks_plot.xaxis.set_major_locator(MultipleLocator(observation_duration / 10))
+        # bayesian_blocks_plot.xaxis.set_minor_locator(MultipleLocator(observation_duration / 50))
+        # bayesian_blocks_plot.tick_params(axis='both', which='major', labelsize=10)
+
         figure.suptitle(
             f"Lightcurve in Broadband and Separated Energy Bands (Binsize of {binsize}s)"
         )
-        pyplot.savefig(svg_data := StringIO(), bbox_inches="tight")
-        pyplot.close(figure)
+        plt.savefig(svg_data := StringIO(), bbox_inches="tight")
+        plt.close(figure)
         return svg_data
 
-
 class HrcProcessor(ObservationProcessor):
-    """Processes for observations produced by the HRC (High Resolution Camera) instrument aboard
-    Chandra."""
+    """Processes observations produced by the HRC (High Resolution Camera) instrument aboard Chandra."""
 
-    def extract_lightcurves(self, event_list, binsize):
-        raise NotImplementedError()
+    # Define energy level as a constant for one band
+    ENERGY_RANGE = "broad=100:10000"  # 0.1 - 10.0 keV
+
+    def adjust_binsize(self, event_list):
+        """
+        Adjusts the binsize according to the HRC time resolution.
+
+        Parameters:
+        event_list (str): Path to the event list file.
+
+        Returns:
+        float: Adjusted binsize.
+        """
+        try:
+            time_resolution = float(dmkeypar(infile=event_list, keyword="TIMEDEL", echo=True))
+            return max(self.binsize // time_resolution * time_resolution, time_resolution)
+        except Exception as e:
+            raise ValueError(f"Failed to adjust binsize: {e}")
+
+    def extract_lightcurves(self, event_list):
+        """
+        Extracts lightcurves from the event list file.
+
+        Parameters:
+        event_list (str): Path to the event list file.
+
+        Returns:
+        pathlib.Path: Path to the extracted lightcurve file.
+        """
+        adjusted_binsize = self.adjust_binsize(event_list)
+        output_file = Path(f"{event_list}.broad.lc")
+        dmextract(
+            infile=f"{event_list}[{HrcProcessor.ENERGY_RANGE}][bin time=::{adjusted_binsize}]",
+            outfile=str(output_file),
+            opt="ltc1",
+            clobber="yes",
+        )
+        return output_file
+
+    def filter_lightcurve_columns(self, lightcurve):
+        """
+        Filters and extracts specific columns from lightcurve files.
+
+        Parameters:
+        lightcurve (pathlib.Path): Lightcurve file path.
+
+        Returns:
+        pathlib.Path: Path to the filtered lightcurve file.
+        """
+        output_file = lightcurve.with_suffix('.ascii')
+        dmlist(
+            infile=f"{lightcurve}[cols time,count_rate,count_rate_err,counts,exposure,area]",
+            opt="data,clean",
+            outfile=str(output_file),
+        )
+        return output_file
+
+    def get_lightcurve_data(self, lightcurve):
+        """
+        Reads lightcurve data from file and returns as a DataFrame.
+
+        Parameters:
+        lightcurve (pathlib.Path): Lightcurve file path.
+
+        Returns:
+        pandas.DataFrame: Lightcurve data.
+        """
+        data = table.Table.read(lightcurve, format="ascii").to_pandas()
+        # Filter out zero exposure points
+        return data[data["broad"]["EXPOSURE"] != 0]
+
+    def get_lightcurve_counts(self, lightcurve_data):
+        """
+        Sums the total counts from the lightcurve data.
+
+        Parameters:
+        lightcurve_data (pandas.DataFrame): Lightcurve data.
+
+        Returns:
+        int: Total counts.
+        """
+        return int(lightcurve_data["broad"]["COUNTS"].sum())
 
     @staticmethod
-    def filter_lightcurve_columns(lightcurves):
-        raise NotImplementedError()
+    def create_csv(lightcurve_data):
+        """Create CSV with columns for each energy level.
 
-    @staticmethod
-    def get_lightcurve_data(lightcurves):
-        raise NotImplementedError()
+        Parameters
+        ----------
+        lightcurve_data : dict
+            Dictionary of DataFrames containing lightcurve data.
 
-    @staticmethod
-    def get_lightcurve_counts(lightcurve_data):
-        raise NotImplementedError()
+        Returns
+        -------
+        StringIO
+            StringIO object with CSV data.
+        """
+        combined_data = DataFrame({
+            "time": lightcurve_data["broad"]["TIME"],
+            "count_rate": lightcurve_data["broad"]["COUNT_RATE"],
+            "counts": lightcurve_data["broad"]["COUNTS"],
+            "count_error": lightcurve_data["broad"]["COUNT_RATE_ERR"],
+            "exposure": lightcurve_data["broad"]["EXPOSURE"],
+            "area": lightcurve_data["broad"]["AREA"],
+        })
+        output_csv = StringIO()
+        combined_data.to_csv(output_csv, index=False)
+        return output_csv
 
     def plot(self, lightcurve_data):
-        raise NotImplementedError()
+        """
+        Generates plots for the lightcurve data.
+
+        Parameters:
+        lightcurve_data (pandas.DataFrame): Lightcurve data.
+
+        Returns:
+        LightcurveParseResults: Results including observation data and plots.
+        """
+        observation_data = ObservationData(
+            average_count_rate=float(lightcurve_data["broad"]["COUNT_RATE"].mean()),
+            total_counts=self.get_lightcurve_counts(lightcurve_data),
+            total_exposure_time=float(lightcurve_data["broad"]["EXPOSURE"].sum()),
+            raw_start_time=int(lightcurve_data["broad"]["TIME"].min()),
+        )
+
+        # output_plot_data = StringIO(lightcurve_data.to_string())
+        return LightcurveParseResults(
+            observation_header_info=self.get_observation_details(),
+            observation_data=observation_data,
+            plot_csv_data=self.create_csv(lightcurve_data),
+            plot_svg_data=self.create_plot(lightcurve_data, self.binsize),
+            postagestamp_png_data=plot_postagestamps(
+                self.sky_coords_image, self.detector_coords_image
+            ),
+        )
+
+    @staticmethod
+    def create_plot(lightcurve_data: dict[str, DataFrame], binsize):
+        """Generate a plt plot to model the lightcurves.
+
+        Parameters
+        ----------
+        lightcurve_data : dict
+            Dictionary of DataFrames containing lightcurve data.
+        binsize : float
+            Binsize used for the lightcurve.
+
+        Returns
+        -------
+        StringIO
+            StringIO object with SVG data of the generated plot.
+        """
+        plt.switch_backend("svg")
+        initial_time = lightcurve_data["broad"]["TIME"].min()
+        zero_shifted_time_ks = (lightcurve_data["broad"]["TIME"] - initial_time) / 1000
+        observation_duration = zero_shifted_time_ks.max()
+
+        fig, (count_rate_plot, counts_plot) = plt.subplots(nrows=2, ncols=1, figsize=(12, 8), constrained_layout=True)
+
+        # Plot for count rates
+        count_rate_plot.errorbar(
+            x=zero_shifted_time_ks,
+            y=lightcurve_data["broad"]["COUNT_RATE"],
+            yerr=lightcurve_data["broad"]["COUNT_RATE_ERR"],
+            color="blue",
+            marker="o",
+            markerfacecolor="black",
+            markersize=4,
+            ecolor="black",
+            markeredgecolor="black",
+            capsize=3,
+        )
+        count_rate_plot.set_xlim([0, observation_duration])
+        count_rate_plot.set_title("Broadband Count Rate", fontsize=14)
+        count_rate_plot.set_ylabel("Count Rate (counts/s)", fontsize=12)
+        count_rate_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        count_rate_plot.xaxis.set_major_locator(MultipleLocator(5))
+        count_rate_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        count_rate_plot.tick_params(axis='both', which='major', labelsize=10)
+
+        # Plot for counts
+        counts_plot.plot(
+            zero_shifted_time_ks,
+            lightcurve_data["broad"]["COUNTS"],
+            color="purple",
+            label="Broadband Counts",
+            marker='o',
+            markersize=4,
+        )
+        counts_plot.set_xlim([0, observation_duration])
+        counts_plot.set_title("Counts in Broadband", fontsize=14)
+        counts_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
+        counts_plot.set_ylabel("Counts", fontsize=12)
+        counts_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        counts_plot.xaxis.set_major_locator(MultipleLocator(5))
+        counts_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        counts_plot.tick_params(axis='both', which='major', labelsize=10)
+
+        fig.suptitle(f"Lightcurve in Broadband (Binsize of {binsize}s)", fontsize=16)
+        svg_data = StringIO()
+        plt.savefig(svg_data, bbox_inches="tight")
+        plt.close(fig)
+        return svg_data
