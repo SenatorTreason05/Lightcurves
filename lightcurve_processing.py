@@ -302,13 +302,21 @@ class AcisProcessor(ObservationProcessor):
         chandra_mjd_ref = 50814.0
         initial_time_seconds = lightcurve_data["broad"]["TIME"]
         initial_time = initial_time_seconds.min()
-        initial_time_days = initial_time_seconds / 86400.0
+        initial_time_days = initial_time / 86400.0
         observation_mjd = chandra_mjd_ref + initial_time_days
         observation_date = Time(observation_mjd, format='mjd').to_datetime()
-        zero_shifted_time_kiloseconds = (lightcurve_data["broad"]["TIME"] - initial_time) / 1000
+        readable_date = observation_date.strftime('%Y-%m-%d %H:%M:%S')
+        # time_kiloseconds = initial_time_seconds / 1000
+        zero_shifted_time_kiloseconds = (initial_time_seconds - initial_time) / 1000
         observation_duration = zero_shifted_time_kiloseconds.max()
-        figure, (broad_plot, seperation_plot, counts_plot, hr_plot, lomb_scargle_plot, bayesian_blocks_plot) = plt.subplots(
-            nrows=6, ncols=1, figsize=(12, 18), constrained_layout=True
+        # figure, (broad_plot, seperation_plot, counts_plot, hr_plot, lomb_scargle_plot, bayesian_blocks_plot) = plt.subplots(
+        #     nrows=6, ncols=1, figsize=(12, 18), constrained_layout=True
+        # )
+        # figure, (broad_plot, seperation_plot, counts_plot, hr_plot, lomb_scargle_plot) = plt.subplots(
+        #     nrows=5, ncols=1, figsize=(12, 18), constrained_layout=True
+        # )
+        figure, (broad_plot, seperation_plot, counts_plot, hr_plot) = plt.subplots(
+            nrows=4, ncols=1, figsize=(12, 8), constrained_layout=True
         )
         broad_plot.errorbar(
             x=zero_shifted_time_kiloseconds,
@@ -329,7 +337,7 @@ class AcisProcessor(ObservationProcessor):
         broad_plot.xaxis.set_major_locator(MultipleLocator(5))  
         broad_plot.xaxis.set_minor_locator(MultipleLocator(1))
         broad_plot.tick_params(axis='both', which='major', labelsize=10)
-        broad_plot.text(0.95, 0.95, f"Start: {observation_date}",
+        broad_plot.text(0.95, 0.95, f"Start: {readable_date}",
             transform=broad_plot.transAxes,
             fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
 
@@ -344,7 +352,7 @@ class AcisProcessor(ObservationProcessor):
             )
         seperation_plot.legend(
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.05),
+            bbox_to_anchor=(0.5, 1.00),
             ncol=4,
             frameon=False,
             fontsize=12,
@@ -411,7 +419,7 @@ class AcisProcessor(ObservationProcessor):
             zero_shifted_time_kiloseconds,
             hr_new,
             color="green",
-            label="HR_New (S-(M+H))/(S+M+H)",
+            label="HR_SMH (S-(M+H))/(S+M+H)",
             marker='o',
             markersize=4,
         )
@@ -424,23 +432,27 @@ class AcisProcessor(ObservationProcessor):
         hr_plot.xaxis.set_major_locator(MultipleLocator(5))
         hr_plot.xaxis.set_minor_locator(MultipleLocator(1))
         hr_plot.tick_params(axis='both', which='major', labelsize=10)
-        hr_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.05), ncol=2, frameon=False, fontsize=12)
+        hr_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.00), ncol=3, frameon=False, fontsize=12)
 
 
-        counts_rate = lightcurve_data["broad"]["COUNTS"]
-        integer_counts = counts_rate.round().astype(int) 
-        frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
-        lomb_scargle_plot.plot(frequency, power, color='darkblue')
-        lomb_scargle_plot.set_title("Lomb-Scargle Periodogram", fontsize=14)
-        lomb_scargle_plot.set_xlabel("Frequency (1/sec)", fontsize=12)
-        lomb_scargle_plot.set_ylabel("Power", fontsize=12)
-        lomb_scargle_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
-        lomb_scargle_plot.xaxis.set_major_locator(MultipleLocator(0.0001))
-        lomb_scargle_plot.xaxis.set_minor_locator(MultipleLocator(0.00002))
-        lomb_scargle_plot.tick_params(axis='both', which='major', labelsize=10)
+        # counts_rate = lightcurve_data["broad"]["COUNTS"]
+        # integer_counts = counts_rate.round().astype(int) 
+        # frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
+        # lomb_scargle_plot.plot(frequency, power, color='darkblue')
+        # lomb_scargle_plot.set_title("Lomb-Scargle Periodogram", fontsize=14)
+        # lomb_scargle_plot.set_xlabel("Frequency (1/sec)", fontsize=12)
+        # lomb_scargle_plot.set_ylabel("Power", fontsize=12)
+        # lomb_scargle_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        # lomb_scargle_plot.xaxis.set_major_locator(MultipleLocator(0.0001))
+        # lomb_scargle_plot.xaxis.set_minor_locator(MultipleLocator(0.00002))
+        # lomb_scargle_plot.tick_params(axis='both', which='major', labelsize=10)
 
-        
-        # bins = bayesian_blocks(zero_shifted_time_kiloseconds, integer_counts, fitness='events')
+        # epsilon = 1e-10
+        # zero_shifted_time_kiloseconds = np.array(zero_shifted_time_kiloseconds)
+        # integer_counts = np.array(integer_counts)
+        # integer_counts = np.maximum(integer_counts, epsilon)
+        # integer_counts = np.round(integer_counts).astype(int)
+        # bins = bayesian_blocks(time_kiloseconds, integer_counts, fitness='measures')
         # bayesian_blocks_plot.hist(zero_shifted_time_kiloseconds, bins=bins, color='lightblue', edgecolor='black', alpha=0.7)
         # bayesian_blocks_plot.set_title("Bayesian Blocks Segmentation", fontsize=14)
         # bayesian_blocks_plot.set_xlabel("Time (seconds)", fontsize=12)
