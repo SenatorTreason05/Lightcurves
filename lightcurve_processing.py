@@ -312,12 +312,12 @@ class AcisProcessor(ObservationProcessor):
         # figure, (broad_plot, seperation_plot, counts_plot, hr_plot, lomb_scargle_plot, bayesian_blocks_plot) = plt.subplots(
         #     nrows=6, ncols=1, figsize=(12, 18), constrained_layout=True
         # )
-        # figure, (broad_plot, seperation_plot, counts_plot, hr_plot, lomb_scargle_plot) = plt.subplots(
-        #     nrows=5, ncols=1, figsize=(12, 18), constrained_layout=True
-        # )
-        figure, (broad_plot, seperation_plot, counts_plot, hr_plot) = plt.subplots(
-            nrows=4, ncols=1, figsize=(12, 8), constrained_layout=True
+        figure, (broad_plot, seperation_plot, counts_plot, hr_plot, lomb_scargle_plot) = plt.subplots(
+            nrows=5, ncols=1, figsize=(12, 12), constrained_layout=True
         )
+        # figure, (broad_plot, seperation_plot, counts_plot, hr_plot) = plt.subplots(
+        #     nrows=4, ncols=1, figsize=(12, 8), constrained_layout=True
+        # )
         broad_plot.errorbar(
             x=zero_shifted_time_kiloseconds,
             y=lightcurve_data["broad"]["COUNT_RATE"],
@@ -435,17 +435,16 @@ class AcisProcessor(ObservationProcessor):
         hr_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.00), ncol=3, frameon=False, fontsize=12)
 
 
-        # counts_rate = lightcurve_data["broad"]["COUNTS"]
-        # integer_counts = counts_rate.round().astype(int) 
-        # frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
-        # lomb_scargle_plot.plot(frequency, power, color='darkblue')
-        # lomb_scargle_plot.set_title("Lomb-Scargle Periodogram", fontsize=14)
-        # lomb_scargle_plot.set_xlabel("Frequency (1/sec)", fontsize=12)
-        # lomb_scargle_plot.set_ylabel("Power", fontsize=12)
-        # lomb_scargle_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
-        # lomb_scargle_plot.xaxis.set_major_locator(MultipleLocator(0.0001))
-        # lomb_scargle_plot.xaxis.set_minor_locator(MultipleLocator(0.00002))
-        # lomb_scargle_plot.tick_params(axis='both', which='major', labelsize=10)
+        integer_counts = lightcurve_data["broad"]["COUNTS"].round().astype(int) 
+        frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
+        lomb_scargle_plot.plot(frequency, power, color='darkblue')
+        lomb_scargle_plot.set_title("Lomb-Scargle Periodogram", fontsize=14)
+        lomb_scargle_plot.set_xlabel("Frequency (1/sec)", fontsize=12)
+        lomb_scargle_plot.set_ylabel("Power", fontsize=12)
+        lomb_scargle_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        lomb_scargle_plot.xaxis.set_major_locator(MultipleLocator(0.2))
+        lomb_scargle_plot.xaxis.set_minor_locator(MultipleLocator(0.1))
+        lomb_scargle_plot.tick_params(axis='both', which='major', labelsize=10)
 
         # epsilon = 1e-10
         # zero_shifted_time_kiloseconds = np.array(zero_shifted_time_kiloseconds)
