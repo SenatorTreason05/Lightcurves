@@ -33,9 +33,9 @@ def run_main_program():
 
 def main():
     """Main method."""
-    progress_file = Path("/ciao/ciao-4.16/Lightcurves/batch_run/batch_progress.txt")
+    progress_file = Path("Lightcurves/batch_run/batch_progress.txt")
     object_names = []
-    with open(file="/ciao/ciao-4.16/Lightcurves/batch_run/objects_list.txt", mode="r", encoding="utf-8") as file:
+    with open(file="Lightcurves/batch_run/objects_list.txt", mode="r", encoding="utf-8") as file:
         for line in file:
             object_names.append(line.strip())
     for index, object_name in enumerate(object_names):

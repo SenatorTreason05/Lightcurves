@@ -362,7 +362,7 @@ class AcisProcessor(ObservationProcessor):
         broad_plot.xaxis.set_major_locator(MultipleLocator(5))  
         broad_plot.xaxis.set_minor_locator(MultipleLocator(1))
         broad_plot.tick_params(axis='both', which='major', labelsize=10)
-        broad_plot.text(1.15, 1.15, f"Start: {readable_date}",
+        broad_plot.text(0.995, 1.15, f"Start: {readable_date}",
             transform=broad_plot.transAxes,
             fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
 
