@@ -15,7 +15,7 @@ from astropy.stats import bayesian_blocks
 from astropy.time import Time
 
 # pylint: disable-next=no-name-in-module
-from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, new_pfiles_environment
+from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, new_pfiles_environment, glvary
 from matplotlib import pyplot as plt
 from pandas import DataFrame
 
@@ -200,6 +200,30 @@ class AcisProcessor(ObservationProcessor):
             )
             outfiles.append(Path(outfile))
         return outfiles
+    
+    def extract_glvary(self, event_list, binsize, effile):
+        outfiles = []
+        self.binsize = self.adjust_binsize(event_list, binsize)
+        
+        # Define the infile and outfile names
+        infile = f"{event_list}"
+        outfile = f"{event_list}.gl_prob.fits"
+        lcfile = f"{event_list}.lc_prob.fits"
+        
+        # Call the glvary tool
+        glvary(
+            infile=infile,
+            outfile=outfile,
+            lcfile=lcfile,
+            effile=effile,  # path to the efficiency file
+            clobber="yes"
+        )
+        
+        # Append the generated lightcurve file to the outfiles list
+        outfiles.append(Path(lcfile))
+        outfiles.append(Path(outfile))
+        
+        return outfiles
 
     @staticmethod
     def filter_lightcurve_columns(lightcurves):
@@ -302,19 +326,20 @@ class AcisProcessor(ObservationProcessor):
 
         # chandra time initialization
         chandra_mjd_ref = 50814.0
-        initial_time_seconds = lightcurve_data["broad"]["TIME"]
-        initial_time = initial_time_seconds.min()
+        time_seconds = lightcurve_data["broad"]["TIME"]
+        initial_time = time_seconds.min()
+        final_time = time_seconds.max()
         initial_time_days = initial_time / 86400.0
         observation_mjd = chandra_mjd_ref + initial_time_days
         observation_date = Time(observation_mjd, format='mjd').to_datetime()
         readable_date = observation_date.strftime('%Y-%m-%d %H:%M:%S')
-        time_kiloseconds = initial_time_seconds / 1000
-        zero_shifted_time_kiloseconds = (initial_time_seconds - initial_time) / 1000
+        # time_kiloseconds = time_seconds / 1000
+        zero_shifted_time_kiloseconds = (time_seconds - initial_time) / 1000
         observation_duration = zero_shifted_time_kiloseconds.max()
 
         # figure 
         figure, (broad_plot, separation_plot, counts_plot, hr_plot, bayesian_blocks_plot, lomb_scargle_plot) = plt.subplots(
-            nrows=6, ncols=1, figsize=(12, 16), constrained_layout=True
+            nrows=6, ncols=1, figsize=(12, 18), constrained_layout=True
         )
 
         # count rate plot 
@@ -337,7 +362,7 @@ class AcisProcessor(ObservationProcessor):
         broad_plot.xaxis.set_major_locator(MultipleLocator(5))  
         broad_plot.xaxis.set_minor_locator(MultipleLocator(1))
         broad_plot.tick_params(axis='both', which='major', labelsize=10)
-        broad_plot.text(0.95, 0.95, f"Start: {readable_date}",
+        broad_plot.text(1.15, 1.15, f"Start: {readable_date}",
             transform=broad_plot.transAxes,
             fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
 
@@ -345,7 +370,6 @@ class AcisProcessor(ObservationProcessor):
         separated_light_level_colors = {"ultrasoft": "green", "soft": "red", "medium": "gold", "hard": "blue"}
 
         # loop through light levels
-
         for light_level, color in separated_light_level_colors.items():
             separation_plot.plot(
                 zero_shifted_time_kiloseconds,
@@ -436,8 +460,42 @@ class AcisProcessor(ObservationProcessor):
         hr_plot.tick_params(axis='both', which='major', labelsize=10)
         hr_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.00), ncol=3, frameon=False, fontsize=12)
 
-        # bayesian blocks plot
+
         integer_counts = lightcurve_data["broad"]["COUNTS"].round().astype(int) 
+        # bayesian blocks plot
+        bayesian_count_rate = lightcurve_data["broad"]["COUNT_RATE"]
+        bins = bayesian_blocks(zero_shifted_time_kiloseconds, bayesian_count_rate, fitness='measures')
+        median_bin_size = np.median(np.diff(bins))
+
+        # Binned count rate light curve
+        # binned_time = np.arange(zero_shifted_time_kiloseconds.min(), zero_shifted_time_kiloseconds.max(), median_bin_size)
+        # binned_count_rate, _ = np.histogram(zero_shifted_time_kiloseconds, bins=binned_time, weights=bayesian_count_rate)
+        # binned_count_rate_err, _ = np.histogram(zero_shifted_time_kiloseconds, bins=binned_time, weights=lightcurve_data["broad"]["COUNT_RATE_ERR"])
+
+        # bayesian_blocks_plot.set_xlim([0, observation_duration])
+        # bayesian_blocks_plot.hist(zero_shifted_time_kiloseconds, bins=bins, color='lightblue', edgecolor='black', alpha=0.7)
+        # bayesian_blocks_plot.set_title("Bayesian Blocks Segmentation", fontsize=14)
+        # bayesian_blocks_plot.set_xlabel("Time (seconds)", fontsize=12)
+        # bayesian_blocks_plot.set_ylabel("Counts Rate", fontsize=12)
+        # bayesian_blocks_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        # bayesian_blocks_plot.xaxis.set_major_locator(MultipleLocator(5))
+        # bayesian_blocks_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        # bayesian_blocks_plot.tick_params(axis='both', which='major', labelsize=10)
+
+        # # Overplot binned count rate light curve
+        # bayesian_blocks_plot.errorbar(
+        #     x=binned_time[:-1] + median_bin_size/2,  # center of bins
+        #     y=binned_count_rate,
+        #     yerr=binned_count_rate_err,
+        #     color="red",
+        #     marker="s",
+        #     markerfacecolor="black",
+        #     markersize=4,
+        #     ecolor="black",
+        #     markeredgecolor="black",
+        #     capsize=3,
+        # )
+        # bayesian blocks plot
         bins = bayesian_blocks(zero_shifted_time_kiloseconds, integer_counts, fitness='measures')
         bayesian_blocks_plot.set_xlim([0, observation_duration])
         bayesian_blocks_plot.hist(zero_shifted_time_kiloseconds, bins=bins, color='lightblue', edgecolor='black', alpha=0.7)
@@ -449,23 +507,18 @@ class AcisProcessor(ObservationProcessor):
         bayesian_blocks_plot.xaxis.set_minor_locator(MultipleLocator(1))
         bayesian_blocks_plot.tick_params(axis='both', which='major', labelsize=10)
 
-        # bins = bayesian_blocks(time_kiloseconds, integer_counts, fitness='measures')
-        # bayesian_blocks_plot.set_xlim([time_kiloseconds.min(), time_kiloseconds.min()+observation_duration])
-        # bayesian_blocks_plot.hist(time_kiloseconds, bins=bins, color='lightblue', edgecolor='black', alpha=0.7)
-        # bayesian_blocks_plot.set_title("Bayesian Blocks Segmentation", fontsize=14)
-        # bayesian_blocks_plot.set_xlabel("Time (seconds)", fontsize=12)
-        # bayesian_blocks_plot.set_ylabel("Counts Rate", fontsize=12)
-        # bayesian_blocks_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
-        # bayesian_blocks_plot.xaxis.set_major_locator(MultipleLocator(5))
-        # bayesian_blocks_plot.xaxis.set_minor_locator(MultipleLocator(1))
-        # bayesian_blocks_plot.tick_params(axis='both', which='major', labelsize=10)
-
-        # tick_labels = bayesian_blocks_plot.get_xticklabels()
-        # current_ticks = bayesian_blocks_plot.get_xticks()
-        # shift = time_kiloseconds.min()
-
-        # new_tick_labels = [f"{float(label.get_text().replace('−', '-')) - shift:.1f}" for label in tick_labels]
-        # bayesian_blocks_plot.set_xticklabels(new_tick_labels)
+        # # lomb scargle periodicity plot
+        # frequency, power = LombScargle(zero_shifted_time_kiloseconds, lightcurve_data["broad"]["COUNTS"]).autopower()
+        # period = 1 / frequency
+        # lomb_scargle_plot.set_xlim([0, 1 / frequency.max()])
+        # lomb_scargle_plot.plot(period, power, color='darkblue')
+        # lomb_scargle_plot.set_title("Lomb-Scargle Periodogram", fontsize=14)
+        # lomb_scargle_plot.set_xlabel("Period (sec)", fontsize=12)
+        # lomb_scargle_plot.set_ylabel("Power", fontsize=12)
+        # lomb_scargle_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        # lomb_scargle_plot.xaxis.set_major_locator(MultipleLocator(0.2))
+        # lomb_scargle_plot.xaxis.set_minor_locator(MultipleLocator(0.1))
+        # lomb_scargle_plot.tick_params(axis='both', which='major', labelsize=10)
 
         # lomb scargle periodicity plot
         frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
