@@ -49,7 +49,7 @@ class ObservationHeaderInfo(NamedTuple):
 
 
 class ObservationData(NamedTuple):
-    """Holds data derrived from the observation event list."""
+    """Holds data derived from the observation event list."""
 
     average_count_rate: float
     total_counts: int

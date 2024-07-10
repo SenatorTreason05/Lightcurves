@@ -101,6 +101,7 @@ class Exporter:
                 search_radius=self.config["Search Radius (arcmin)"],
                 significance_threshold=self.config["Significance Threshold"],
                 counts_threshold=self.config["Minimum Counts"],
+                zoom=min(1, self.config["Binsize"]/500),
                 master_data=self.master_data,
             )
             file.write(content)

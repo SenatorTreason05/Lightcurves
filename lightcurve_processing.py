@@ -201,29 +201,37 @@ class AcisProcessor(ObservationProcessor):
             outfiles.append(Path(outfile))
         return outfiles
     
-    def extract_glvary(self, event_list, binsize, effile):
-        outfiles = []
-        self.binsize = self.adjust_binsize(event_list, binsize)
+    # def extract_glvary(self, event_list, binsize, effile):
+    #     outfiles = []
+    #     self.binsize = self.adjust_binsize(event_list, binsize)
         
-        # Define the infile and outfile names
-        infile = f"{event_list}"
-        outfile = f"{event_list}.gl_prob.fits"
-        lcfile = f"{event_list}.lc_prob.fits"
+    #     # Define the infile and outfile names
+    #     infile = f"{event_list}"
+    #     outfile = f"{event_list}.gl_prob.fits"
+    #     lcfile = f"{event_list}.lc_prob.fits"
         
-        # Call the glvary tool
-        glvary(
-            infile=infile,
-            outfile=outfile,
-            lcfile=lcfile,
-            effile=effile,  # path to the efficiency file
-            clobber="yes"
-        )
+    #     # Call the glvary tool
+    #     glvary(
+    #         infile=infile,
+    #         outfile=outfile,
+    #         lcfile=lcfile,
+    #         effile=effile,  # path to the efficiency file
+    #         clobber="yes"
+    #     )
         
-        # Append the generated lightcurve file to the outfiles list
-        outfiles.append(Path(lcfile))
-        outfiles.append(Path(outfile))
+    #     # Append the generated lightcurve file to the outfiles list
+    #     outfiles.append(Path(lcfile))
+    #     outfiles.append(Path(outfile))
         
-        return outfiles
+    #     return outfiles
+    
+    # @staticmethod
+    # def get_glvary_data(glvary_file):
+    #     with io.fits.open(glvary_file) as hdul:
+    #         glvary_data = hdul[1].data
+    #         times = glvary_data['TIME']
+    #         probabilities = glvary_data['PROB']
+    #     return times, probabilities
 
     @staticmethod
     def filter_lightcurve_columns(lightcurves):
@@ -319,8 +327,7 @@ class AcisProcessor(ObservationProcessor):
             ),
         )
 
-    @staticmethod
-    def create_plot(lightcurve_data: dict[str, DataFrame], binsize):
+    def create_plot(self, lightcurve_data: dict[str, DataFrame], binsize):
         """Generate a plt plot to model the lightcurves."""
         matplotlib.use("svg")
 
@@ -333,14 +340,22 @@ class AcisProcessor(ObservationProcessor):
         observation_mjd = chandra_mjd_ref + initial_time_days
         observation_date = Time(observation_mjd, format='mjd').to_datetime()
         readable_date = observation_date.strftime('%Y-%m-%d %H:%M:%S')
+        # integer counts
+        integer_counts = lightcurve_data["broad"]["COUNTS"].round().astype(int) 
         # time_kiloseconds = time_seconds / 1000
         zero_shifted_time_kiloseconds = (time_seconds - initial_time) / 1000
         observation_duration = zero_shifted_time_kiloseconds.max()
-
+        # glvary_times, glvary_probs = self.get_glvary_data(glvary_file)
+        width = 12 * (500 / binsize if binsize < 500 else 1)
+        nrows = 7
         # figure 
-        figure, (broad_plot, separation_plot, counts_plot, hr_plot, bayesian_blocks_plot, lomb_scargle_plot) = plt.subplots(
-            nrows=6, ncols=1, figsize=(12, 18), constrained_layout=True
+        figure, (broad_plot, separation_plot, counts_plot, hr_plot, cumulative_counts_plot, bayesian_blocks_plot, lomb_scargle_plot) = plt.subplots(
+            nrows=nrows, ncols=1, figsize=(width, nrows*3), constrained_layout=True
         )
+
+        # figure, (broad_plot, separation_plot, counts_plot, hr_plot, bayesian_blocks_plot, lomb_scargle_plot, glvary_plot) = plt.subplots(
+        #     nrows=7, ncols=1, figsize=(12, 21), constrained_layout=True
+        # )
 
         # count rate plot 
         broad_plot.errorbar(
@@ -362,7 +377,7 @@ class AcisProcessor(ObservationProcessor):
         broad_plot.xaxis.set_major_locator(MultipleLocator(5))  
         broad_plot.xaxis.set_minor_locator(MultipleLocator(1))
         broad_plot.tick_params(axis='both', which='major', labelsize=10)
-        broad_plot.text(0.995, 1.15, f"Start: {readable_date}",
+        broad_plot.text(0.995, 1.13, f"Start: {readable_date}",
             transform=broad_plot.transAxes,
             fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
 
@@ -379,13 +394,13 @@ class AcisProcessor(ObservationProcessor):
             )
         separation_plot.legend(
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.00),
+            bbox_to_anchor=(0.5, 1.19),
             ncol=4,
             frameon=False,
             fontsize=12,
         )
         separation_plot.set_xlim([0, observation_duration])
-        separation_plot.set_title("Separated Energy Band Count Rates", fontsize=14)
+        separation_plot.set_title("Separated Energy Band Count Rates", fontsize=14, y = 1.15)
         separation_plot.set_ylabel("Count Rate (counts/s)", fontsize=12)
         separation_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
         separation_plot.xaxis.set_major_locator(MultipleLocator(5))  
@@ -402,25 +417,41 @@ class AcisProcessor(ObservationProcessor):
             markersize=4,
         )
         counts_plot.set_xlim([0, observation_duration])
-        counts_plot.set_title("Counts in Broadband", fontsize=14)
+        counts_plot.set_title("Counts in Broadband", fontsize=14, y = 1.05)
         counts_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
         counts_plot.set_ylabel("Counts", fontsize=12)
         counts_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
         counts_plot.xaxis.set_major_locator(MultipleLocator(5))  
         counts_plot.xaxis.set_minor_locator(MultipleLocator(1))
         counts_plot.tick_params(axis='both', which='major', labelsize=10)
+        total_counts=round(float(lightcurve_data["broad"]["COUNTS"].sum()), 3)
+        average_count_rate=round(float(lightcurve_data["broad"]["COUNT_RATE"].mean()), 3)
+        min_count_rate=round(float(lightcurve_data["broad"]["COUNT_RATE"].min()), 3)
+        max_count_rate=round(float(lightcurve_data["broad"]["COUNT_RATE"].max()), 3)
+
+        text_str = (
+            f"Total Counts: {total_counts:.3f}          Average Count Rate: {average_count_rate:.3f}\n"
+            f"Min Count Rate: {min_count_rate:.3f}          Max Count Rate: {max_count_rate:.3f}"
+        )
+        counts_plot.text(0.995, 1.2, text_str,
+                     transform=counts_plot.transAxes,
+                     fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
+
 
         # calculate hardness ratios
         hard_counts = lightcurve_data["hard"]["COUNTS"]
         soft_counts = lightcurve_data["soft"]["COUNTS"]
         medium_counts = lightcurve_data["medium"]["COUNTS"]
+        ultrasoft_counts = lightcurve_data["ultrasoft"]["COUNTS"]
 
         total_counts_hs = soft_counts + hard_counts
         hr_hs = (hard_counts - soft_counts) / total_counts_hs
         total_counts_ms = soft_counts + medium_counts
         hr_ms = (medium_counts - soft_counts) / total_counts_ms
-        total_counts_all = soft_counts + medium_counts + hard_counts
-        hr_new = (soft_counts - (medium_counts + hard_counts)) / total_counts_all
+        total_counts_smh = soft_counts + medium_counts + hard_counts
+        hr_smh = (soft_counts - (medium_counts + hard_counts)) / total_counts_smh
+        total_counts_mhsu = ultrasoft_counts + soft_counts + medium_counts + hard_counts
+        hr_mhsu = ((medium_counts + hard_counts) - (soft_counts + ultrasoft_counts) ) / total_counts_mhsu
 
         # hardness ratio plot
         hr_plot.plot(
@@ -443,25 +474,44 @@ class AcisProcessor(ObservationProcessor):
 
         hr_plot.plot(
             zero_shifted_time_kiloseconds,
-            hr_new,
+            hr_smh,
             color="green",
             label="HR_SMH (S-(M+H))/(S+M+H)",
             marker='o',
             markersize=4,
         )
 
+        hr_plot.plot(
+            zero_shifted_time_kiloseconds,
+            hr_mhsu,
+            color="purple",
+            label="HR_HMSU ((M+H)-(S+U)))/(M+H+S+U)",
+            marker='1',
+            markersize=4,
+        )
+
         hr_plot.set_xlim([0, observation_duration])
-        hr_plot.set_title("Hardness Ratios", fontsize=14)
+        hr_plot.set_title("Hardness Ratios", fontsize=14, y = 1.29)
         hr_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
         hr_plot.set_ylabel("Hardness Ratio", fontsize=12)
         hr_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
         hr_plot.xaxis.set_major_locator(MultipleLocator(5))
         hr_plot.xaxis.set_minor_locator(MultipleLocator(1))
         hr_plot.tick_params(axis='both', which='major', labelsize=10)
-        hr_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.00), ncol=3, frameon=False, fontsize=12)
+        hr_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.32), ncol=2, frameon=False, fontsize=12)
 
+        # jimmy's cumulative counts plot
+        cumulative_counts = np.cumsum(integer_counts)
+        cumulative_counts_plot.plot(zero_shifted_time_kiloseconds, cumulative_counts, color='magenta')
+        cumulative_counts_plot.set_xlim([0, observation_duration])
+        cumulative_counts_plot.set_title("Cumulative Counts", fontsize=14)
+        cumulative_counts_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
+        cumulative_counts_plot.set_ylabel("Cumulative Counts", fontsize=12)
+        cumulative_counts_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        cumulative_counts_plot.xaxis.set_major_locator(MultipleLocator(5))
+        cumulative_counts_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        cumulative_counts_plot.tick_params(axis='both', which='major', labelsize=10)
 
-        integer_counts = lightcurve_data["broad"]["COUNTS"].round().astype(int) 
         # bayesian blocks plot
         bayesian_count_rate = lightcurve_data["broad"]["COUNT_RATE"]
         bins = bayesian_blocks(zero_shifted_time_kiloseconds, bayesian_count_rate, fitness='measures')
@@ -531,6 +581,21 @@ class AcisProcessor(ObservationProcessor):
         lomb_scargle_plot.xaxis.set_major_locator(MultipleLocator(0.2))
         lomb_scargle_plot.xaxis.set_minor_locator(MultipleLocator(0.1))
         lomb_scargle_plot.tick_params(axis='both', which='major', labelsize=10)
+
+        # glvary_plot.plot(
+        #     glvary_times, 
+        #     glvary_probs, 
+        #     color='darkgreen', 
+        #     label='GLVAR Probabilities'
+        # )
+        # glvary_plot.set_xlim([0, observation_duration])
+        # glvary_plot.set_title("Gregory-Laredo Variability Analysis", fontsize=14)
+        # glvary_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
+        # glvary_plot.set_ylabel("Probability", fontsize=12)
+        # glvary_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        # glvary_plot.xaxis.set_major_locator(MultipleLocator(5))
+        # glvary_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        # glvary_plot.tick_params(axis='both', which='major', labelsize=10)
 
         figure.suptitle(
             f"Lightcurve in Broadband and Separated Energy Bands (Binsize of {binsize}s)"
