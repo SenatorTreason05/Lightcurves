@@ -119,14 +119,27 @@ class LightcurveGenerator:
         """Makes sure that all observations contain enough counts to meet the user specified
         threshold, otherwise signal to the processor that it needs to cancel itself."""
         while True:
+            # check if queue has reached the maximum size
             if counts_checker.queue.qsize() == queue_max_size:
+                # collect all items from the queue as a tuple
                 queue_members = tuple(counts_checker.queue.get() for _ in range(queue_max_size))
-                if any(observation < max_counts for observation in queue_members):
+                
+                # calculate the average of the observations
+                average_observation_counts = sum(queue_members) / queue_max_size
+                
+                # check if the average is below the max_counts threshold
+                if average_observation_counts < max_counts:
                     counts_checker.cancel_event.set()
+                
+                # mark all tasks as done
                 for _ in range(queue_max_size):
                     counts_checker.queue.task_done()
+                
+                # break the loop after processing the queue
                 break
-            time.sleep(0.1)
+            
+        # sleep for a short duration before checking again
+        time.sleep(0.1)
 
     def assign_workers(self, observation_directories, message_collection_queue, counts_check_queue):
         __ = [
