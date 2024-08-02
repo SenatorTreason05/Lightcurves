@@ -16,7 +16,7 @@ from astropy.stats import bayesian_blocks
 from astropy.time import Time
 
 # pylint: disable-next=no-name-in-module
-from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, new_pfiles_environment, glvary
+from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, new_pfiles_environment, glvary, dmcoords
 from matplotlib import pyplot as plt
 from pandas import DataFrame
 
@@ -161,12 +161,22 @@ class ObservationProcessor(ABC):
 
     def get_observation_details(self):
         """Gets keys from the header block detailing the observation information."""
-        return ObservationHeaderInfo(
+        dmstat(infile=f"{self.event_list}[cols ra,dec]")
+        RA_0=dmstat.out_mean.split(',')[0] 
+        dec_0=dmstat.out_mean.split(',')[1]
+        dmcoords(infile=f"{self.event_list}", option="cel", ra=RA_0, dec=dec_0)
+        theta_0=dmcoords.theta
+        phi_0=dmcoords.phi
+        return ObservationHeaderInfo( 
             instrument=dmkeypar(infile=f"{self.event_list}", keyword="INSTRUME", echo=True),
             observation_id=dmkeypar(infile=f"{self.event_list}", keyword="OBS_ID", echo=True),
             region_id=dmkeypar(infile=f"{self.event_list}", keyword="REGIONID", echo=True),
             start_time=dmkeypar(infile=f"{self.event_list}", keyword="DATE-OBS", echo=True),
             end_time=dmkeypar(infile=f"{self.event_list}", keyword="DATE-END", echo=True),
+            off_axis_offset=round(float(theta_0), 1),
+            azimuth=int(phi_0),
+            right_ascension=round(float(RA_0), 5),
+            declination=round(float(dec_0), 5)
         )
 
 
@@ -341,24 +351,31 @@ class AcisProcessor(ObservationProcessor):
         observation_mjd = chandra_mjd_ref + initial_time_days
         observation_date = Time(observation_mjd, format='mjd').to_datetime()
         readable_date = observation_date.strftime('%Y-%m-%d %H:%M:%S')
+
+        # details
+        observation_id=dmkeypar(infile=f"{self.event_list}", keyword="OBS_ID", echo=True)
+        file_path=self.event_list
+        source_name=file_path.parts[1]
+
         # integer counts
         integer_counts = lightcurve_data["broad"]["COUNTS"].round().astype(int).reset_index(drop=True)
+
         # count rate
         integer_count_rate = lightcurve_data["broad"]["COUNT_RATE"].round().astype(int).reset_index(drop=True)
+
         # time_kiloseconds = time_seconds / 1000
         zero_shifted_time_kiloseconds = (time_seconds - initial_time) / 1000
         observation_duration = zero_shifted_time_kiloseconds.max()
+
         # glvary_times, glvary_probs = self.get_glvary_data(glvary_file)
+        # width, nrows
         width = 12 * (500 / binsize if binsize < 500 else 1)
-        nrows = 10
+        nrows = 12
+
         # figure 
-        figure, (broad_plot, separation_plot, counts_plot, hr_plot, cumulative_counts_plot, bayesian_blocks_plot_5, bayesian_blocks_plot_1, lomb_scargle_plot_freq, lomb_scargle_plot_per, lomb_scargle_plot_win) = plt.subplots(
+        figure, (broad_plot, separation_plot, counts_plot, hr_plot, cumulative_counts_plot, bayesian_blocks_plot_10, bayesian_blocks_plot_5, bayesian_blocks_plot_1, lomb_scargle_plot_freq, lomb_scargle_plot_per, lomb_scargle_plot_win, lomb_scargle_plot_win_cor) = plt.subplots(
             nrows=nrows, ncols=1, figsize=(width, nrows*3), constrained_layout=True
         )
-
-        # figure, (broad_plot, separation_plot, counts_plot, hr_plot, bayesian_blocks_plot, lomb_scargle_plot, glvary_plot) = plt.subplots(
-        #     nrows=7, ncols=1, figsize=(12, 21), constrained_layout=True
-        # )
 
         # count rate plot 
         broad_plot.errorbar(
@@ -374,13 +391,15 @@ class AcisProcessor(ObservationProcessor):
             capsize=3,
         )        
         broad_plot.set_xlim([0, observation_duration])
-        broad_plot.set_title("Broadband Count Rate", fontsize=14)
+        broad_plot.set_title("Broadband Count Rate", fontsize=14, y=1.05)
         broad_plot.set_ylabel("Count Rate (counts/s)", fontsize=12)
         broad_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
         broad_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
         broad_plot.xaxis.set_major_locator(MultipleLocator(5))  
         broad_plot.xaxis.set_minor_locator(MultipleLocator(1))
         broad_plot.tick_params(axis='both', which='major', labelsize=10)
+        broad_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=broad_plot.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
         broad_plot.text(0.995, 1.13, f"Start: {readable_date}",
             transform=broad_plot.transAxes,
             fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
@@ -404,13 +423,41 @@ class AcisProcessor(ObservationProcessor):
             fontsize=12,
         )
         separation_plot.set_xlim([0, observation_duration])
-        separation_plot.set_title("Separated Energy Band Count Rates", fontsize=14, y = 1.15)
+        separation_plot.set_title("Separated Energy Band Count Rates", fontsize=14, y = 1.29)
         separation_plot.set_ylabel("Count Rate (counts/s)", fontsize=12)
         separation_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
         separation_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
         separation_plot.xaxis.set_major_locator(MultipleLocator(5))  
         separation_plot.xaxis.set_minor_locator(MultipleLocator(1))
         separation_plot.tick_params(axis='both', which='major', labelsize=10)
+        separation_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.32), ncol=2, frameon=False, fontsize=12)
+        separation_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=separation_plot.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+        avg_ultra=round(float(lightcurve_data["ultrasoft"]["COUNT_RATE"].sum()), 3)
+        avg_soft=round(float(lightcurve_data["soft"]["COUNT_RATE"].mean()), 3)
+        avg_medium=round(float(lightcurve_data["medium"]["COUNT_RATE"].min()), 3)
+        avg_hard=round(float(lightcurve_data["hard"]["COUNT_RATE"].max()), 3)
+
+        left_text_1 = f"Avg Ultra CR: {avg_ultra:.3f}"
+        right_text_1 = f"Avg Soft CR: {avg_soft:.3f}"
+
+        left_text_2 = f"Avg Medium CR: {avg_medium:.3f}"
+        right_text_2 = f"Avg Hard CR: {avg_hard:.3f}"
+
+        # determine the maximum lengths of the left and right text segments
+        max_left_length = max(len(left_text_1), len(left_text_2))
+        max_right_length = max(len(right_text_1), len(right_text_2))
+
+        # set the total width with some padding (e.g., 5 characters)
+        total_width = max_left_length + max_right_length + 5
+        
+        sep_str = (
+            f"{left_text_1:<{total_width - max_right_length}}{right_text_1}\n"
+            f"{left_text_2:<{total_width - max_right_length}}{right_text_2}"
+        )
+        separation_plot.text(0.995, 1.2, sep_str,
+                     transform=separation_plot.transAxes,
+                     fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
         
         # counts plot
         counts_plot.plot(
@@ -434,15 +481,30 @@ class AcisProcessor(ObservationProcessor):
         min_count_rate=round(float(lightcurve_data["broad"]["COUNT_RATE"].min()), 3)
         max_count_rate=round(float(lightcurve_data["broad"]["COUNT_RATE"].max()), 3)
 
+        left_text_1 = f"Total Counts: {total_counts:.3f}"
+        right_text_1 = f"Avg Count Rate: {average_count_rate:.3f}"
+
+        left_text_2 = f"Min Count Rate: {min_count_rate:.3f}"
+        right_text_2 = f"Max Count Rate: {max_count_rate:.3f}"
+
+        # determine the maximum lengths of the left and right text segments
+        max_left_length = max(len(left_text_1), len(left_text_2))
+        max_right_length = max(len(right_text_1), len(right_text_2))
+
+        # set the total width with some padding (e.g., 5 characters)
+        total_width = max_left_length + max_right_length + 5
+
         text_str = (
-            f"Total Counts: {total_counts:.3f}          Average Count Rate: {average_count_rate:.3f}\n"
-            f"Min Count Rate: {min_count_rate:.3f}          Max Count Rate: {max_count_rate:.3f}"
+            f"{left_text_1:<{total_width - max_right_length}}{right_text_1}\n"
+            f"{left_text_2:<{total_width - max_right_length}}{right_text_2}"
         )
+        
         counts_plot.text(0.995, 1.2, text_str,
                      transform=counts_plot.transAxes,
                      fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
-
-
+        counts_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=counts_plot.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+        
         # calculate hardness ratios
         hard_counts = lightcurve_data["hard"]["COUNTS"]
         soft_counts = lightcurve_data["soft"]["COUNTS"]
@@ -450,20 +512,20 @@ class AcisProcessor(ObservationProcessor):
         ultrasoft_counts = lightcurve_data["ultrasoft"]["COUNTS"]
 
         total_counts_hs = soft_counts + hard_counts
-        hr_hs = (hard_counts - soft_counts) / total_counts_hs
+        hr_hs = -(hard_counts - soft_counts) / total_counts_hs
         total_counts_ms = soft_counts + medium_counts
-        hr_ms = (medium_counts - soft_counts) / total_counts_ms
+        hr_ms = -(medium_counts - soft_counts) / total_counts_ms
         total_counts_smh = soft_counts + medium_counts + hard_counts
         hr_smh = (soft_counts - (medium_counts + hard_counts)) / total_counts_smh
         total_counts_mhsu = ultrasoft_counts + soft_counts + medium_counts + hard_counts
-        hr_mhsu = ((medium_counts + hard_counts) - (soft_counts + ultrasoft_counts) ) / total_counts_mhsu
+        hr_mhsu = -((medium_counts + hard_counts) - (soft_counts + ultrasoft_counts) ) / total_counts_mhsu
 
         # hardness ratio plot
         hr_plot.plot(
             zero_shifted_time_kiloseconds,
             hr_hs,
             color="blue",
-            label="HR_HS (H-S)/(H+S)",
+            label="HR_HS (S-H)/(S+H)",
             marker='^',
             markersize=4,
         )
@@ -472,7 +534,7 @@ class AcisProcessor(ObservationProcessor):
             zero_shifted_time_kiloseconds,
             hr_ms,
             color="orange",
-            label="HR_MS (M-S)/(M+S)",
+            label="HR_MS (S-M)/(S+M)",
             marker='v',
             markersize=4,
         )
@@ -490,7 +552,7 @@ class AcisProcessor(ObservationProcessor):
             zero_shifted_time_kiloseconds,
             hr_mhsu,
             color="purple",
-            label="HR_HMSU ((M+H)-(S+U)))/(M+H+S+U)",
+            label="HR_HMSU ((S+U)-(M+H)))/(S+U+M+H)",
             marker='1',
             markersize=4,
         )
@@ -504,198 +566,298 @@ class AcisProcessor(ObservationProcessor):
         hr_plot.xaxis.set_minor_locator(MultipleLocator(1))
         hr_plot.tick_params(axis='both', which='major', labelsize=10)
         hr_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.32), ncol=2, frameon=False, fontsize=12)
+        hr_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=hr_plot.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+    
+
+        region_event_list = self.isolate_source_region(self.event_list, self.source_region)
+        dmlist(
+            infile=f"{region_event_list}[cols time]",
+            outfile=(outfile := f"{region_event_list}.txt"),
+            opt="data,raw"
+        )
+        times = table.Table.read(filename=f"{region_event_list}.txt", format="ascii")
+        new_times = np.array(times)
+        new_times_array = [x[0] for x in new_times]
+        if (new_times_array[0] - initial_time) >= 0:
+            new_times_array -= initial_time
+        else: 
+            new_times_array -= new_times_array[0]
+        new_times_array /= 1000.0  # Convert to kiloseconds\
+
+
+        sorted_times = np.sort(new_times_array)
+        sorted_times = np.insert(sorted_times, 0, 0)
+        sorted_times = np.append(sorted_times, observation_duration)
+        y_values = np.arange(0, len(sorted_times) - 1)
+        y_values = np.append(y_values, y_values[-1])
 
         # jimmy's cumulative counts plot
-        cumulative_counts = np.cumsum(integer_counts)
-        cumulative_counts_plot.plot(zero_shifted_time_kiloseconds, cumulative_counts, color='magenta')
+        cumulative_counts_plot.step(sorted_times, y_values, where='mid', color='magenta')
         cumulative_counts_plot.set_xlim([0, observation_duration])
-        cumulative_counts_plot.set_title("Cumulative Counts", fontsize=14)
+        cumulative_counts_plot.set_title("Cumulative Counts", fontsize=14, y=1.05)
         cumulative_counts_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
         cumulative_counts_plot.set_ylabel("Cumulative Counts", fontsize=12)
         cumulative_counts_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
         cumulative_counts_plot.xaxis.set_major_locator(MultipleLocator(5))
         cumulative_counts_plot.xaxis.set_minor_locator(MultipleLocator(1))
         cumulative_counts_plot.tick_params(axis='both', which='major', labelsize=10)
+        cumulative_counts_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=cumulative_counts_plot.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+        
+        # Compute Bayesian blocks
+        if (total_counts < 5):
+            hist = np.array([total_counts])
+            bin_edges = np.array([0, observation_duration])
+            # if fewer than 5 counts: tstart tstop make one big bin with number of counts and skip bb call
+        else: 
+            bb = bayesian_blocks(new_times_array, fitness="events", p0=5)
+            bb10 = bayesian_blocks(new_times_array, fitness="events", p0=10)
+            bb1 = bayesian_blocks(new_times_array, fitness="events", p0=1)
 
-        # bins = bayesian_blocks(zero_shifted_time_kiloseconds, count_rate, fitness='measures', p0=5)
+            # Compute histogram
+            hist, bin_edges = np.histogram(new_times_array, bins=bb)
+            hist = np.insert(hist, 0, 0)
+            hist = np.append(hist, 0)
+            bin_edges = np.insert(bin_edges, 0, 0)
+            bin_edges = np.append(bin_edges, observation_duration)
 
-        # # Initialize arrays for count rates and errors
-        # count_rates = []
-        # errors = []
-        # bin_centers = []
+        time_intervals = np.diff(bin_edges)
 
-        # # Calculate count rates and errors for each interval between change points
-        # for i in range(len(bins) - 1):
-        #     t_k = bins[i]
-        #     t_k1 = bins[i + 1]
+        min_interval_width = observation_duration / 100.0
+        i = 0
+        while i < len(time_intervals):
+            if time_intervals[i] < min_interval_width:
+                if i == 0:
+                    hist[i+1] += hist[i]
+                    hist = np.delete(hist, i)
+                    bin_edges = np.delete(bin_edges, i+1)
+                elif i == len(time_intervals) - 1:
+                    hist[i-1] += hist[i]
+                    hist = np.delete(hist, i)
+                    bin_edges = np.delete(bin_edges, i)
+                # Compare the counts in hist[i] and hist[i+1]
+                elif hist[i-1] < hist[i+1]:
+                    # Merge with the previous bin
+                    hist[i-1] += hist[i]
+                    hist = np.delete(hist, i)
+                    bin_edges = np.delete(bin_edges, i)
+                else:
+                    # Merge with the next bin
+                    hist[i] += hist[i+1]
+                    hist = np.delete(hist, i+1)
+                    bin_edges = np.delete(bin_edges, i+1)
+                time_intervals = np.diff(bin_edges)
+            else:
+                i += 1
             
-        #     # Find events in the current interval
-        #     in_bin = (zero_shifted_time_kiloseconds >= t_k) & (zero_shifted_time_kiloseconds < t_k1)
-        #     c_k = np.sum(count_rate[in_bin])  # Counts in the interval
-        #     interval_duration = t_k1 - t_k  # Duration of the interval
-            
-        #     # Calculate count rate and error
-        #     if interval_duration > 0:
-        #         r_k = c_k / interval_duration
-        #         rerr_k = np.sqrt(c_k) / interval_duration
-        #     else:
-        #         r_k = 0
-        #         rerr_k = 0
-            
-        #     # Store the results
-        #     count_rates.append(r_k)
-        #     errors.append(rerr_k)
-        #     bin_centers.append(0.5 * (t_k + t_k1))
+        count_rates = (hist / time_intervals)/1000
+        errors = (np.sqrt(hist) / time_intervals)/1000
 
-        # # Convert lists to numpy arrays
-        # count_rates = np.array(count_rates)
-        # errors = np.array(errors)
-        # bin_centers = np.array(bin_centers)
+        bin_midpoints = (bin_edges[:-1] + bin_edges[1:]) / 2
 
-        # # Plotting Bayesian Blocks with count rates and errors
-        # bayesian_blocks_plot_5.errorbar(bin_centers, count_rates, yerr=errors, fmt='o', color='black', ecolor='red', capsize=3, linestyle='None')
-        # bayesian_blocks_plot_5.set_xlim([0, observation_duration])
-        # bayesian_blocks_plot_5.set_title("Bayesian Blocks Segmentation: p0 = 5", fontsize=14)
-        # bayesian_blocks_plot_5.set_xlabel("Time (kiloseconds)", fontsize=12)
-        # bayesian_blocks_plot_5.set_ylabel("Count Rate (cts/s)", fontsize=12)
-        # bayesian_blocks_plot_5.grid(True, which='both', linestyle='--', linewidth=0.5)
-        # bayesian_blocks_plot_5.xaxis.set_major_locator(MultipleLocator(5))
-        # bayesian_blocks_plot_5.xaxis.set_minor_locator(MultipleLocator(1))
-        # bayesian_blocks_plot_5.tick_params(axis='both', which='major', labelsize=10)
+        bayesian_blocks_plot_5.step(bin_edges, np.append(count_rates, count_rates[-1]), where='post', color='black', linestyle='-')
+        bayesian_blocks_plot_5.errorbar(bin_midpoints, count_rates, yerr=errors, fmt='none', ecolor='red', capsize=3)
 
-        # bayesian p0=5
-        bins = bayesian_blocks(zero_shifted_time_kiloseconds, integer_counts, fitness='measures', p0=5)
-        # Calculate histogram
-        hist, bin_edges = np.histogram(zero_shifted_time_kiloseconds, bins=bins)
-        counts_per_bin, _ = np.histogram(zero_shifted_time_kiloseconds, bins=bins, weights=lightcurve_data["broad"]["COUNT_RATE"])
-        # Calculate bin centers
-        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-        # Calculate interval
-        interval_durations = (bin_edges[1:] - bin_edges[:-1])
-        # Calculate errors (Poisson statistics)
-        errors = np.sqrt(hist) / (interval_durations)
         bayesian_blocks_plot_5.set_xlim([0, observation_duration])
-        bayesian_blocks_plot_5.hist(zero_shifted_time_kiloseconds, bins=bins, color='white', edgecolor='black', alpha=0.7, histtype='stepfilled')
-        bayesian_blocks_plot_5.errorbar(bin_centers, hist, yerr=errors, fmt='none', color='black', ecolor='red', capsize=3, linestyle='None')
-        bayesian_blocks_plot_5.set_title("Bayesian Blocks Segmentation: p0 = 5", fontsize=14)
+        bayesian_blocks_plot_5.set_title("Bayesian Blocks Segmentation: p0 = 5", fontsize=14, y=1.05)
         bayesian_blocks_plot_5.set_xlabel("Time (kiloseconds)", fontsize=12)
-        bayesian_blocks_plot_5.set_ylabel("Counts", fontsize=12)
+        bayesian_blocks_plot_5.set_ylabel("Count Rate", fontsize=12)
         bayesian_blocks_plot_5.grid(True, which='both', linestyle='--', linewidth=0.5)
         bayesian_blocks_plot_5.xaxis.set_major_locator(MultipleLocator(5))
         bayesian_blocks_plot_5.xaxis.set_minor_locator(MultipleLocator(1))
         bayesian_blocks_plot_5.tick_params(axis='both', which='major', labelsize=10)
+        bayesian_blocks_plot_5.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=bayesian_blocks_plot_5.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+    
+        if (total_counts < 5):
+            hist = np.array([total_counts])
+            bin_edges = np.array([0, observation_duration])
+            # if fewer than 5 counts: tstart tstop make one big bin with number of counts and skip bb call
+        else: 
+            # Compute histogram
+            hist, bin_edges = np.histogram(new_times_array, bins=bb10)
+            hist = np.insert(hist, 0, 0)
+            hist = np.append(hist, 0)
+            bin_edges = np.insert(bin_edges, 0, 0)
+            bin_edges = np.append(bin_edges, observation_duration)
 
-        # bayesian p0=1
-        bins = bayesian_blocks(zero_shifted_time_kiloseconds, integer_counts, fitness='measures', p0=1)
-        # Calculate histogram
-        hist, bin_edges = np.histogram(zero_shifted_time_kiloseconds, bins=bins)
-        counts_per_bin, _ = np.histogram(zero_shifted_time_kiloseconds, bins=bins, weights=lightcurve_data["broad"]["COUNT_RATE"])
-        # Calculate bin centers
-        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-        # Calculate interval
-        interval_durations = (bin_edges[1:] - bin_edges[:-1])
-        # Calculate errors (Poisson statistics)
-        errors = np.sqrt(hist) / (interval_durations)
+        time_intervals = np.diff(bin_edges)
+
+        min_interval_width = observation_duration / 100.0
+        i = 0
+        while i < len(time_intervals):
+            if time_intervals[i] < min_interval_width:
+                if i == 0:
+                    hist[i+1] += hist[i]
+                    hist = np.delete(hist, i)
+                    bin_edges = np.delete(bin_edges, i+1)
+                elif i == len(time_intervals) - 1:
+                    hist[i-1] += hist[i]
+                    hist = np.delete(hist, i)
+                    bin_edges = np.delete(bin_edges, i)
+                # Compare the counts in hist[i] and hist[i+1]
+                elif hist[i-1] < hist[i+1]:
+                    # Merge with the previous bin
+                    hist[i-1] += hist[i]
+                    hist = np.delete(hist, i)
+                    bin_edges = np.delete(bin_edges, i)
+                else:
+                    # Merge with the next bin
+                    hist[i] += hist[i+1]
+                    hist = np.delete(hist, i+1)
+                    bin_edges = np.delete(bin_edges, i+1)
+                time_intervals = np.diff(bin_edges)
+            else:
+                i += 1
+            
+        count_rates = (hist / time_intervals)/1000
+        errors = (np.sqrt(hist) / time_intervals)/1000
+
+        bin_midpoints = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+        bayesian_blocks_plot_10.step(bin_edges, np.append(count_rates, count_rates[-1]), where='post', color='black', linestyle='-')
+        bayesian_blocks_plot_10.errorbar(bin_midpoints, count_rates, yerr=errors, fmt='none', ecolor='red', capsize=3)
+
+        bayesian_blocks_plot_10.set_xlim([0, observation_duration])
+        bayesian_blocks_plot_10.set_title("Bayesian Blocks Segmentation: p0 = 10", fontsize=14, y=1.05)
+        bayesian_blocks_plot_10.set_xlabel("Time (kiloseconds)", fontsize=12)
+        bayesian_blocks_plot_10.set_ylabel("Count Rate", fontsize=12)
+        bayesian_blocks_plot_10.grid(True, which='both', linestyle='--', linewidth=0.5)
+        bayesian_blocks_plot_10.xaxis.set_major_locator(MultipleLocator(5))
+        bayesian_blocks_plot_10.xaxis.set_minor_locator(MultipleLocator(1))
+        bayesian_blocks_plot_10.tick_params(axis='both', which='major', labelsize=10)
+        bayesian_blocks_plot_10.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=bayesian_blocks_plot_10.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+
+        # again for bb1
+
+        if (total_counts < 5):
+            hist = np.array([total_counts])
+            bin_edges = np.array([0, observation_duration])
+            # if fewer than 5 counts: tstart tstop make one big bin with number of counts and skip bb call
+        else:
+            # Compute histogram
+            hist, bin_edges = np.histogram(new_times_array, bins=bb1)
+            hist = np.insert(hist, 0, 0)
+            hist = np.append(hist, 0)
+            bin_edges = np.insert(bin_edges, 0, 0)
+            bin_edges = np.append(bin_edges, observation_duration)
+
+        time_intervals = np.diff(bin_edges)
+
+        min_interval_width = observation_duration / 100.0
+        i = 0
+        while i < len(time_intervals):
+            if time_intervals[i] < min_interval_width:
+                if i == 0:
+                    hist[i+1] += hist[i]
+                    hist = np.delete(hist, i)
+                    bin_edges = np.delete(bin_edges, i+1)
+                elif i == len(time_intervals) - 1:
+                    hist[i-1] += hist[i]
+                    hist = np.delete(hist, i)
+                    bin_edges = np.delete(bin_edges, i)
+                # Compare the counts in hist[i] and hist[i+1]
+                elif hist[i-1] < hist[i+1]:
+                    # Merge with the previous bin
+                    hist[i-1] += hist[i]
+                    hist = np.delete(hist, i)
+                    bin_edges = np.delete(bin_edges, i)
+                else:
+                    # Merge with the next bin
+                    hist[i] += hist[i+1]
+                    hist = np.delete(hist, i+1)
+                    bin_edges = np.delete(bin_edges, i+1)
+                time_intervals = np.diff(bin_edges)
+            else:
+                i += 1
+            
+        count_rates = (hist / time_intervals)/1000
+        errors = (np.sqrt(hist) / time_intervals)/1000
+
+        bin_midpoints = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+        bayesian_blocks_plot_1.step(bin_edges, np.append(count_rates, count_rates[-1]), where='post', color='black', linestyle='-')
+        bayesian_blocks_plot_1.errorbar(bin_midpoints, count_rates, yerr=errors, fmt='none', ecolor='red', capsize=3)
+
         bayesian_blocks_plot_1.set_xlim([0, observation_duration])
-        bayesian_blocks_plot_1.hist(zero_shifted_time_kiloseconds, bins=bins, color='white', edgecolor='black', alpha=0.7, histtype='stepfilled')
-        bayesian_blocks_plot_1.errorbar(bin_centers, hist, yerr=errors, fmt='none', color='black', ecolor='red', capsize=3, linestyle='None')
-        bayesian_blocks_plot_1.set_title("Bayesian Blocks Segmentation: p0 = 1", fontsize=14)
+        bayesian_blocks_plot_1.set_title("Bayesian Blocks Segmentation: p0 = 1", fontsize=14, y=1.05)
         bayesian_blocks_plot_1.set_xlabel("Time (kiloseconds)", fontsize=12)
-        bayesian_blocks_plot_1.set_ylabel("Counts", fontsize=12)
+        bayesian_blocks_plot_1.set_ylabel("Count Rate", fontsize=12)
         bayesian_blocks_plot_1.grid(True, which='both', linestyle='--', linewidth=0.5)
         bayesian_blocks_plot_1.xaxis.set_major_locator(MultipleLocator(5))
         bayesian_blocks_plot_1.xaxis.set_minor_locator(MultipleLocator(1))
         bayesian_blocks_plot_1.tick_params(axis='both', which='major', labelsize=10)
+        bayesian_blocks_plot_1.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=bayesian_blocks_plot_1.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+    
 
-        # # bayesian p0=10
-        # bins = bayesian_blocks(zero_shifted_time_kiloseconds, integer_counts, fitness='measures', p0=10)
-        # # Calculate histogram
-        # hist, bin_edges = np.histogram(zero_shifted_time_kiloseconds, bins=bins)
-        # counts_per_bin, _ = np.histogram(zero_shifted_time_kiloseconds, bins=bins, weights=lightcurve_data["broad"]["COUNT_RATE"])
-        # # Calculate bin centers
-        # bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-        # # Calculate interval
-        # interval_durations = (bin_edges[1:] - bin_edges[:-1])
-        # # Calculate errors (Poisson statistics)
-        # errors = np.sqrt(counts_per_bin) / (interval_durations)
-        # bayesian_blocks_plot_10.set_xlim([0, observation_duration])
-        # bayesian_blocks_plot_10.hist(zero_shifted_time_kiloseconds, bins=bins, color='white', edgecolor='black', alpha=0.7, histtype='stepfilled')
-        # bayesian_blocks_plot_10.errorbar(bin_centers, hist, yerr=errors, fmt='none', color='black', ecolor='red', capsize=3, linestyle='None')
-        # bayesian_blocks_plot_10.set_title("Bayesian Blocks Segmentation: p0 = 10", fontsize=14)
-        # bayesian_blocks_plot_10.set_xlabel("Time (kiloseconds)", fontsize=12)
-        # bayesian_blocks_plot_10.set_ylabel("Counts", fontsize=12)
-        # bayesian_blocks_plot_10.grid(True, which='both', linestyle='--', linewidth=0.5)
-        # bayesian_blocks_plot_10.xaxis.set_major_locator(MultipleLocator(5))
-        # bayesian_blocks_plot_10.xaxis.set_minor_locator(MultipleLocator(1))
-        # bayesian_blocks_plot_10.tick_params(axis='both', which='major', labelsize=10)
+        # lomb scargle lower bound
+        initial_lower_bound = binsize / 1000
 
         # lomb scargle frequency plot
         frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
-        lomb_scargle_plot_freq.set_xlim([0, frequency.max()])
+        lomb_scargle_plot_freq.set_xlim([0, 1/(binsize/1000)])
         lomb_scargle_plot_freq.plot(frequency, power, color='darkblue')
-        lomb_scargle_plot_freq.set_title("Lomb-Scargle Frequency Plot", fontsize=14)
-        lomb_scargle_plot_freq.set_xlabel("Frequency (1/sec)", fontsize=12)
+        lomb_scargle_plot_freq.set_title("Lomb-Scargle Frequency Plot", fontsize=14, y=1.05)
+        lomb_scargle_plot_freq.set_xlabel("Frequency (1/kilosecond)", fontsize=12)
         lomb_scargle_plot_freq.set_ylabel("Power", fontsize=12)
         lomb_scargle_plot_freq.grid(True, which='both', linestyle='--', linewidth=0.5)
         lomb_scargle_plot_freq.xaxis.set_major_locator(MultipleLocator(0.2))
         lomb_scargle_plot_freq.xaxis.set_minor_locator(MultipleLocator(0.1))
         lomb_scargle_plot_freq.tick_params(axis='both', which='major', labelsize=10)
-
+        lomb_scargle_plot_freq.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=lomb_scargle_plot_freq.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+    
         # exposure time and data
         exptime = 3.2
         exp = lightcurve_data["broad"]["EXPOSURE"].reset_index(drop=True)
 
         # lomb scargle period plot
-        frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
+        frequency, power1 = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
         period = 1/frequency
-        lomb_scargle_plot_per.set_xlim([exptime, observation_duration])
-        lomb_scargle_plot_per.set_ylim([0, (power.max()*1.1)])
+        lomb_scargle_plot_per.set_xlim([initial_lower_bound, observation_duration])
         lomb_scargle_plot_per.plot(period, power, color='blue')
-        lomb_scargle_plot_per.set_title("Lomb-Scargle Periodogram", fontsize=14)
-        lomb_scargle_plot_per.set_xlabel("Period (sec)", fontsize=12)
+        lomb_scargle_plot_per.set_title("Lomb-Scargle Periodogram", fontsize=14, y=1.05)
+        lomb_scargle_plot_per.set_xlabel("Period (kiloseconds)", fontsize=12)
         lomb_scargle_plot_per.set_ylabel("Power", fontsize=12)
         lomb_scargle_plot_per.grid(True, which='both', linestyle='--', linewidth=0.5)
         lomb_scargle_plot_per.xaxis.set_major_locator(MultipleLocator(5))
         lomb_scargle_plot_per.xaxis.set_minor_locator(MultipleLocator(1))
         lomb_scargle_plot_per.tick_params(axis='both', which='major', labelsize=10)
-
+        lomb_scargle_plot_per.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=lomb_scargle_plot_per.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+    
         # lomb scargle window plot
-        frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts/exp).autopower()
+        frequency, power2 = LombScargle(zero_shifted_time_kiloseconds, exp).autopower()
         period = 1/frequency
-        lomb_scargle_plot_win.set_xlim([exptime, observation_duration])
-        lomb_scargle_plot_win.set_ylim([0, (power.max()*1.1)])
-        lomb_scargle_plot_win.plot(period, power, color='lightblue')
-        lomb_scargle_plot_win.set_title("Lomb-Scargle with Window Function", fontsize=14)
-        lomb_scargle_plot_win.set_xlabel("Period (sec)", fontsize=12)
+        lomb_scargle_plot_win.set_xlim([initial_lower_bound, observation_duration])
+        lomb_scargle_plot_win.plot(period, power2, color='lightblue')
+        lomb_scargle_plot_win.set_title("Lomb-Scargle Plot of Window Function", fontsize=14, y=1.05)
+        lomb_scargle_plot_win.set_xlabel("Period (kiloseconds)", fontsize=12)
         lomb_scargle_plot_win.set_ylabel("Power", fontsize=12)
         lomb_scargle_plot_win.grid(True, which='both', linestyle='--', linewidth=0.5)
         lomb_scargle_plot_win.xaxis.set_major_locator(MultipleLocator(5))
         lomb_scargle_plot_win.xaxis.set_minor_locator(MultipleLocator(1))
         lomb_scargle_plot_win.tick_params(axis='both', which='major', labelsize=10)
-
-        """bins = bayesian_blocks(zero_shifted_time_kiloseconds, integer_counts, fitness='measures')
-        bayesian_blocks_plot.set_xlim([0, observation_duration])
-        bayesian_blocks_plot.hist(zero_shifted_time_kiloseconds, bins=bins, color='lightblue', edgecolor='black', alpha=0.7)
-        bayesian_blocks_plot.set_title("Bayesian Blocks Segmentation", fontsize=14)
-        bayesian_blocks_plot.set_xlabel("Time (seconds)", fontsize=12)
-        bayesian_blocks_plot.set_ylabel("Counts Rate", fontsize=12)
-        bayesian_blocks_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
-        bayesian_blocks_plot.xaxis.set_major_locator(MultipleLocator(5))
-        bayesian_blocks_plot.xaxis.set_minor_locator(MultipleLocator(1))
-        bayesian_blocks_plot.tick_params(axis='both', which='major', labelsize=10)
-
-        # lomb scargle periodicity plot
-        frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
-        lomb_scargle_plot.set_xlim([0, frequency.max()])
-        lomb_scargle_plot.plot(frequency, power, color='darkblue')
-        lomb_scargle_plot.set_title("Lomb-Scargle Periodogram", fontsize=14)
-        lomb_scargle_plot.set_xlabel("Frequency (1/sec)", fontsize=12)
-        lomb_scargle_plot.set_ylabel("Power", fontsize=12)
-        lomb_scargle_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
-        lomb_scargle_plot.xaxis.set_major_locator(MultipleLocator(0.2))
-        lomb_scargle_plot.xaxis.set_minor_locator(MultipleLocator(0.1))
-        lomb_scargle_plot.tick_params(axis='both', which='major', labelsize=10)"""
-
+        lomb_scargle_plot_win.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=lomb_scargle_plot_win.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+    
+        # lomb scargle divided by window plot
+        new_power = power1/power2
+        lomb_scargle_plot_win_cor.set_xlim([(binsize/1000), observation_duration])
+        lomb_scargle_plot_win_cor.plot(period, new_power, color='orange')
+        lomb_scargle_plot_win_cor.set_title("Lomb-Scargle Periodogram \nCorrected for Window Function", fontsize=14, y=1.05)
+        lomb_scargle_plot_win_cor.set_xlabel("Period (kiloseconds)", fontsize=12)
+        lomb_scargle_plot_win_cor.set_ylabel("Ratio", fontsize=12)
+        lomb_scargle_plot_win_cor.grid(True, which='both', linestyle='--', linewidth=0.5)
+        lomb_scargle_plot_win_cor.xaxis.set_major_locator(MultipleLocator(5))
+        lomb_scargle_plot_win_cor.xaxis.set_minor_locator(MultipleLocator(1))
+        lomb_scargle_plot_win_cor.tick_params(axis='both', which='major', labelsize=10)
+        lomb_scargle_plot_win_cor.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=lomb_scargle_plot_win_cor.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+    
         # glvary_plot.plot(
         #     glvary_times, 
         #     glvary_probs, 
@@ -713,7 +875,7 @@ class AcisProcessor(ObservationProcessor):
 
         figure.suptitle(
             f"Lightcurve in Broadband and Separated Energy Bands (Binsize of {binsize}s)"
-        )
+        , fontsize="xx-large")
         plt.savefig(svg_data := StringIO(), bbox_inches="tight")
         plt.close(figure)
         return svg_data

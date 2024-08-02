@@ -46,6 +46,10 @@ class ObservationHeaderInfo(NamedTuple):
     region_id: int
     start_time: str
     end_time: str
+    off_axis_offset: str
+    azimuth: str
+    right_ascension: str
+    declination: str
 
 
 class ObservationData(NamedTuple):
