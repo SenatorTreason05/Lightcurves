@@ -1,13 +1,12 @@
 """Mihir Patankar [mpatankar06@gmail.com]"""
 import uuid
+import gzip
 from abc import ABC, abstractmethod
 from io import StringIO
 from pathlib import Path
 import threading
 import os
-
 import numpy as np
-
 import matplotlib
 from matplotlib.ticker import MultipleLocator, AutoMinorLocator
 from astropy import io, table
@@ -16,7 +15,9 @@ from astropy.stats import bayesian_blocks
 from astropy.time import Time
 
 # pylint: disable-next=no-name-in-module
-from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, new_pfiles_environment, glvary, dmcoords
+from ciao_contrib.runtool import dmcopy, dmextract, dmkeypar, dmlist, dmstat, new_pfiles_environment, glvary, dmcoords, dither_region, acis_set_ardlib, dmtcalc
+from ciao_contrib.cda.data import download_chandra_obsids
+from pycrates import *
 from matplotlib import pyplot as plt
 from pandas import DataFrame
 
@@ -212,38 +213,6 @@ class AcisProcessor(ObservationProcessor):
             outfiles.append(Path(outfile))
         return outfiles
     
-    # def extract_glvary(self, event_list, binsize, effile):
-    #     outfiles = []
-    #     self.binsize = self.adjust_binsize(event_list, binsize)
-        
-    #     # Define the infile and outfile names
-    #     infile = f"{event_list}"
-    #     outfile = f"{event_list}.gl_prob.fits"
-    #     lcfile = f"{event_list}.lc_prob.fits"
-        
-    #     # Call the glvary tool
-    #     glvary(
-    #         infile=infile,
-    #         outfile=outfile,
-    #         lcfile=lcfile,
-    #         effile=effile,  # path to the efficiency file
-    #         clobber="yes"
-    #     )
-        
-    #     # Append the generated lightcurve file to the outfiles list
-    #     outfiles.append(Path(lcfile))
-    #     outfiles.append(Path(outfile))
-        
-    #     return outfiles
-    
-    # @staticmethod
-    # def get_glvary_data(glvary_file):
-    #     with io.fits.open(glvary_file) as hdul:
-    #         glvary_data = hdul[1].data
-    #         times = glvary_data['TIME']
-    #         probabilities = glvary_data['PROB']
-    #     return times, probabilities
-
     @staticmethod
     def filter_lightcurve_columns(lightcurves):
         outfiles = []
@@ -269,27 +238,6 @@ class AcisProcessor(ObservationProcessor):
                 lightcurve_dataframe["EXPOSURE"] != 0
             ]
         return lightcurve_data
-
-    # def get_lightcurve_data(lightcurves: list[Path]):
-    #     lightcurve_data: dict[str, DataFrame] = {}
-    #     for energy_level, lightcurve in zip(AcisProcessor.ENERGY_LEVELS.keys(), lightcurves):
-    #         try:
-    #             # Attempt to read the file and convert to pandas DataFrame
-    #             table_data = table.Table.read(lightcurve, format="ascii")
-    #             lightcurve_dataframe = table_data.to_pandas()
-    #             # Ensure the DataFrame has an "EXPOSURE" column
-    #             if "EXPOSURE" in lightcurve_dataframe.columns:
-    #                 # Filter out rows with zero exposure
-    #                 lightcurve_data[energy_level] = lightcurve_dataframe[lightcurve_dataframe["EXPOSURE"] != 0]
-    #             else:
-    #                 print(f"Warning: 'EXPOSURE' column not found in {lightcurve}")
-    #         except FileNotFoundError:
-    #             print(f"Error: File {lightcurve} not found.")
-    #             continue
-    #         except Exception as e:
-    #             print(f"Error processing {lightcurve}: {e}")
-    #             continue
-    #     return lightcurve_data
 
     @staticmethod
     def get_lightcurve_counts(lightcurve_data):
@@ -359,6 +307,7 @@ class AcisProcessor(ObservationProcessor):
 
         # integer counts
         integer_counts = lightcurve_data["broad"]["COUNTS"].round().astype(int).reset_index(drop=True)
+        req_min_counts = 15
 
         # count rate
         integer_count_rate = lightcurve_data["broad"]["COUNT_RATE"].round().astype(int).reset_index(drop=True)
@@ -370,10 +319,10 @@ class AcisProcessor(ObservationProcessor):
         # glvary_times, glvary_probs = self.get_glvary_data(glvary_file)
         # width, nrows
         width = 12 * (500 / binsize if binsize < 500 else 1)
-        nrows = 12
+        nrows = 14
 
         # figure 
-        figure, (broad_plot, separation_plot, counts_plot, hr_plot, cumulative_counts_plot, bayesian_blocks_plot_10, bayesian_blocks_plot_5, bayesian_blocks_plot_1, lomb_scargle_plot_freq, lomb_scargle_plot_per, lomb_scargle_plot_win, lomb_scargle_plot_win_cor) = plt.subplots(
+        figure, (broad_plot, bayesian_blocks_plot_10, bayesian_blocks_plot_5, bayesian_blocks_plot_1, counts_plot, glvary_plot, separation_plot, hr_plot, cumulative_counts_plot, lomb_scargle_plot_freq, lomb_scargle_plot_per, lomb_scargle_plot_win, lomb_scargle_plot_win_cor, fracarea_plot) = plt.subplots(
             nrows=nrows, ncols=1, figsize=(width, nrows*3), constrained_layout=True
         )
 
@@ -732,7 +681,7 @@ class AcisProcessor(ObservationProcessor):
 
         # again for bb1
 
-        if (total_counts < 5):
+        if (total_counts < req_min_counts):
             hist = np.array([total_counts])
             bin_edges = np.array([0, observation_duration])
             # if fewer than 5 counts: tstart tstop make one big bin with number of counts and skip bb call
@@ -857,21 +806,147 @@ class AcisProcessor(ObservationProcessor):
         lomb_scargle_plot_win_cor.tick_params(axis='both', which='major', labelsize=10)
         lomb_scargle_plot_win_cor.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
                     transform=lomb_scargle_plot_win_cor.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+
+        observation_directory_event_list = self.event_list
+        observation_directory = observation_directory_event_list.parent
+        initial_directory = os.getcwd()
+        os.chdir(observation_directory)
+        download_chandra_obsids([observation_id], filetypes=["bpix", "asol","msk", "evt2"])
+        os.chdir(initial_directory)
+        obs_path = os.path.join(observation_directory, observation_id)
+        obs_path_primary = os.path.join(obs_path, "primary")
+        observation_path_primary = Path(obs_path_primary)
+        obs_path_secondary = os.path.join(obs_path, "secondary")
+        observation_path_secondary = Path(obs_path_secondary)
+        gzip_files = observation_path_primary.glob("*.gz")
+        for gzip_file in gzip_files:
+            with gzip.open(gzip_file, "rb") as gzipped_file:
+                unzipped_data = gzipped_file.read()
+                with open(gzip_file.with_suffix(""), "wb") as unzipped_file:
+                    unzipped_file.write(unzipped_data)
+                gzip_file.unlink()
+        gzip_files = observation_path_secondary.glob("*.gz")
+        for gzip_file in gzip_files:
+            with gzip.open(gzip_file, "rb") as gzipped_file:
+                unzipped_data = gzipped_file.read()
+                with open(gzip_file.with_suffix(""), "wb") as unzipped_file:
+                    unzipped_file.write(unzipped_data)
+                gzip_file.unlink()
+        bpix_files = list(Path(observation_path_primary).rglob('*bpix1.fits'))
+        bpixfile=bpix_files[0]
+        evt2_files = list(Path(observation_path_primary).rglob('*evt2.fits'))
+        evtfile=evt2_files[0]
+        asol_files = list(Path(observation_path_primary).rglob('*asol1.fits'))
+        asolfile=asol_files[0]
+        msk_files = list(Path(observation_path_secondary).rglob('*msk1.fits'))
+        mskfile=msk_files[0]
+        if len(asol_files) != 1:
+            textfile_path = Path(observation_path_primary) / 'asol_files.txt'
     
-        # glvary_plot.plot(
-        #     glvary_times, 
-        #     glvary_probs, 
-        #     color='darkgreen', 
-        #     label='GLVAR Probabilities'
-        # )
-        # glvary_plot.set_xlim([0, observation_duration])
-        # glvary_plot.set_title("Gregory-Laredo Variability Analysis", fontsize=14)
-        # glvary_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
-        # glvary_plot.set_ylabel("Probability", fontsize=12)
-        # glvary_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
-        # glvary_plot.xaxis.set_major_locator(MultipleLocator(5))
-        # glvary_plot.xaxis.set_minor_locator(MultipleLocator(1))
-        # glvary_plot.tick_params(axis='both', which='major', labelsize=10)
+            with textfile_path.open('w') as textfile:
+                for asol_file in asol_files:
+                    textfile.write(f"{asol_file}\n")
+            asolfile="@"+textfile_path
+
+        region_file = Path(self.source_region)
+        fracarea_path = Path(obs_path) / 'fracarea.fits'
+        # acis_set_ardlib(badpixfile=bpixfile)
+        dither_region(
+            infile=asolfile,
+            region=f"region({region_file})",
+            maskfile=mskfile,
+            outfile=fracarea_path
+        )
+        # Open the FITS file
+        with io.fits.open(fracarea_path) as hdul:            
+            # Access the desired HDU (assuming the data is in the first extension)
+            data_hdu = hdul[1]
+            
+            # Extract the "time" and "fracarea" columns
+            time = data_hdu.data['time']
+            fracarea = data_hdu.data['fracarea']
+            
+            # Convert to NumPy arrays
+            xx_array = np.array(time)
+            yy_array = np.array(fracarea)
+
+        xx_array -= xx_array[0]
+        xx_array /= 1000
+        
+        
+        fracarea_plot.plot(xx_array, yy_array, marker = "None", color = "maroon")
+        fracarea_plot.set_xlim(0, observation_duration)
+        fracarea_plot.set_title("Fraction of Region Area", fontsize=14, y=1.05)
+        fracarea_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
+        fracarea_plot.set_ylabel("Fractional Area", fontsize=12)
+        fracarea_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        fracarea_plot.xaxis.set_major_locator(MultipleLocator(5))
+        fracarea_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        fracarea_plot.tick_params(axis='both', which='major', labelsize=10)
+        fracarea_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=fracarea_plot.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+
+        if (total_counts < req_min_counts):
+            glvary_plot.errorbar(x=zero_shifted_time_kiloseconds,
+            y=lightcurve_data["broad"]["COUNT_RATE"],
+            yerr=lightcurve_data["broad"]["COUNT_RATE_ERR"], ecolor="red", color="olive")
+            # if fewer than 5 counts
+        
+        else: 
+            glvary_path = Path(obs_path) / 'gl_prob.fits'
+            glvary_lc_path = Path(obs_path) / 'lc_prob.fits'
+            dtf_fracarea_path = Path(obs_path) / "dtf_fracarea.fits"
+            dtcor = dmkeypar(infile=evtfile, keyword="DTCOR", echo=True)
+            glvary_effile = dmtcalc(infile=f"{fracarea_path}[cols time,fracarea]", outfile=dtf_fracarea_path, expression=f"dtf=({dtcor}*fracarea)")
+            glvary_result = glvary(infile=f"{evtfile}[sky=region({region_file})]", effile=dtf_fracarea_path, outfile=glvary_path, lcfile=glvary_lc_path)
+            
+            # Open the FITS file
+            with io.fits.open(glvary_lc_path) as hdul:            
+                # Access the desired HDU (assuming the data is in the first extension)
+                data_hdu = hdul[1]
+                
+                # Extract the "time" and "fracarea" columns
+                glvary_time = data_hdu.data['time']
+                glvary_count_rate = data_hdu.data['COUNT_RATE']
+                glvary_count_rate_error = data_hdu.data['COUNT_RATE_ERR']
+                
+                # Convert to NumPy arrays
+                glvary_xx_array = np.array(glvary_time)
+                glvary_yy_array = np.array(glvary_count_rate)
+                glvary_ye_array = np.array(glvary_count_rate_error)
+
+            glvary_xx_array -= glvary_xx_array[0]
+            glvary_xx_array /= 1000
+
+            glvary_plot.plot(glvary_xx_array, glvary_yy_array, color="olive", label="Data")
+
+            # Create shaded error bars
+            glvary_plot.fill_between(
+                glvary_xx_array,
+                glvary_yy_array - glvary_ye_array,  # Lower bound
+                glvary_yy_array + glvary_ye_array,  # Upper bound
+                color='red',
+                alpha=0.3,  # Transparency of the shaded area
+                label='Error Range'
+            )
+
+        glvary_plot.set_xlim(0, observation_duration)
+        glvary_plot.set_title("Gregory-Loredo Algorithm Lightcurve", fontsize=14, y=1.05)
+        glvary_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
+        glvary_plot.set_ylabel("Count Rate", fontsize=12)
+        glvary_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
+        glvary_plot.xaxis.set_major_locator(MultipleLocator(5))
+        glvary_plot.xaxis.set_minor_locator(MultipleLocator(1))
+        glvary_plot.tick_params(axis='both', which='major', labelsize=10)
+        glvary_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
+                    transform=glvary_plot.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
+        # glvary_plot.text(0.995, 1.13, f"VARINDEX: {VARINDEX}",
+        #     transform=broad_plot.transAxes,
+        #     fontsize=10, ha='right', va='top', bbox=dict(facecolor='white', alpha=0.7))
+        
+        # Key   22: R              FRAC3SIG     =       1.00000000     / Frac of lc within 3 sigma of avg rate
+        # Key   23: R              FRAC5SIG     =       1.00000000     / Frac of lc within 5 sigma of avg rate
+        # Key   24: I              VARINDEX     = 1                    / Variability index
 
         figure.suptitle(
             f"Lightcurve in Broadband and Separated Energy Bands (Binsize of {binsize}s)"
@@ -879,6 +954,7 @@ class AcisProcessor(ObservationProcessor):
         plt.savefig(svg_data := StringIO(), bbox_inches="tight")
         plt.close(figure)
         return svg_data
+
 
 class HrcProcessor(ObservationProcessor):
     """Processes observations produced by the HRC (High Resolution Camera) instrument aboard Chandra."""
