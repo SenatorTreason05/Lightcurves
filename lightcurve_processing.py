@@ -382,10 +382,10 @@ class AcisProcessor(ObservationProcessor):
         separation_plot.legend(loc="upper center", bbox_to_anchor=(0.5, 1.32), ncol=2, frameon=False, fontsize=12)
         separation_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
                     transform=separation_plot.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
-        avg_ultra=round(float(lightcurve_data["ultrasoft"]["COUNT_RATE"].sum()), 3)
+        avg_ultra=round(float(lightcurve_data["ultrasoft"]["COUNT_RATE"].mean()), 3)
         avg_soft=round(float(lightcurve_data["soft"]["COUNT_RATE"].mean()), 3)
-        avg_medium=round(float(lightcurve_data["medium"]["COUNT_RATE"].min()), 3)
-        avg_hard=round(float(lightcurve_data["hard"]["COUNT_RATE"].max()), 3)
+        avg_medium=round(float(lightcurve_data["medium"]["COUNT_RATE"].mean()), 3)
+        avg_hard=round(float(lightcurve_data["hard"]["COUNT_RATE"].mean()), 3)
 
         left_text_1 = f"Avg Ultra CR: {avg_ultra:.3f}"
         right_text_1 = f"Avg Soft CR: {avg_soft:.3f}"
@@ -602,6 +602,7 @@ class AcisProcessor(ObservationProcessor):
             
         count_rates = (hist / time_intervals)/1000
         errors = (np.sqrt(hist) / time_intervals)/1000
+        errors = np.abs(errors)
 
         bin_midpoints = (bin_edges[:-1] + bin_edges[1:]) / 2
 
@@ -662,6 +663,7 @@ class AcisProcessor(ObservationProcessor):
             
         count_rates = (hist / time_intervals)/1000
         errors = (np.sqrt(hist) / time_intervals)/1000
+        errors = np.abs(errors)
 
         bin_midpoints = (bin_edges[:-1] + bin_edges[1:]) / 2
 
@@ -724,6 +726,7 @@ class AcisProcessor(ObservationProcessor):
             
         count_rates = (hist / time_intervals)/1000
         errors = (np.sqrt(hist) / time_intervals)/1000
+        errors = np.abs(errors)
 
         bin_midpoints = (bin_edges[:-1] + bin_edges[1:]) / 2
 
@@ -876,6 +879,7 @@ class AcisProcessor(ObservationProcessor):
         
         fracarea_plot.plot(xx_array, yy_array, marker = "None", color = "maroon")
         fracarea_plot.set_xlim(0, observation_duration)
+        # fracarea_plot.set_ylim(0, 1)
         fracarea_plot.set_title("Fraction of Region Area", fontsize=14, y=1.05)
         fracarea_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
         fracarea_plot.set_ylabel("Fractional Area", fontsize=12)
@@ -885,12 +889,12 @@ class AcisProcessor(ObservationProcessor):
         fracarea_plot.tick_params(axis='both', which='major', labelsize=10)
         fracarea_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
                     transform=fracarea_plot.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
-
+        glvary_check = False
         if (total_counts < req_min_counts):
             glvary_plot.errorbar(x=zero_shifted_time_kiloseconds,
             y=lightcurve_data["broad"]["COUNT_RATE"],
             yerr=lightcurve_data["broad"]["COUNT_RATE_ERR"], ecolor="red", color="olive")
-            # if fewer than 5 counts
+            # if fewer than 15 counts
         
         else: 
             glvary_path = Path(obs_path) / 'gl_prob.fits'
@@ -915,20 +919,30 @@ class AcisProcessor(ObservationProcessor):
                 glvary_yy_array = np.array(glvary_count_rate)
                 glvary_ye_array = np.array(glvary_count_rate_error)
 
-            glvary_xx_array -= glvary_xx_array[0]
-            glvary_xx_array /= 1000
+            if glvary_xx_array.size > 0:
+                glvary_xx_array -= glvary_xx_array[0]
+                glvary_xx_array /= 1000
+                glvary_plot.plot(glvary_xx_array, glvary_yy_array, color="olive", label="Data")
 
-            glvary_plot.plot(glvary_xx_array, glvary_yy_array, color="olive", label="Data")
+                # Create shaded error bars
+                glvary_plot.fill_between(
+                    glvary_xx_array,
+                    glvary_yy_array - (glvary_ye_array/2),  # Lower bound
+                    glvary_yy_array + (glvary_ye_array/2),  # Upper bound
+                    color='red',
+                    alpha=0.3,  # Transparency of the shaded area
+                    label='Error Range'
+                )
+                glvary_check = False
+                
+            else:
+                glvary_check = True
 
-            # Create shaded error bars
-            glvary_plot.fill_between(
-                glvary_xx_array,
-                glvary_yy_array - glvary_ye_array,  # Lower bound
-                glvary_yy_array + glvary_ye_array,  # Upper bound
-                color='red',
-                alpha=0.3,  # Transparency of the shaded area
-                label='Error Range'
-            )
+        if glvary_check:
+            glvary_plot.errorbar(x=zero_shifted_time_kiloseconds,
+            y=lightcurve_data["broad"]["COUNT_RATE"],
+            yerr=lightcurve_data["broad"]["COUNT_RATE_ERR"], ecolor="red", color="olive")
+            # if fewer than 15 counts
 
         glvary_plot.set_xlim(0, observation_duration)
         glvary_plot.set_title("Gregory-Loredo Algorithm Lightcurve", fontsize=14, y=1.05)
