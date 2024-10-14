@@ -1,0 +1,26 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: Lightcurves
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Aditya
+    family-names: Raj
+    email: araj@college.harvard.edu
+    affiliation: Harvard University
+repository-code: 'https://github.com/SenatorTreason05/Lightcurves'
+repository: 'https://github.com/mpatankar6/Lightcurves'
+abstract: >-
+  Program for generating lightcurves, code for use at
+  Harvard CXC. Code displays counts, count rates, hardness
+  ratios, lomb-scargle plots, bayesian blocks analysis,
+  cumulative count rate, and gregory loredo variability
+  analysis.
+license: MIT
+commit: 8e23f529e4d59fe2a8a910feab9e350afe37eaa5
+version: '2.0'
+date-released: '2024-10-14'
