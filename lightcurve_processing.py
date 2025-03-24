@@ -525,21 +525,28 @@ class AcisProcessor(ObservationProcessor):
             outfile=(outfile := f"{region_event_list}.txt"),
             opt="data,raw"
         )
-        times = table.Table.read(filename=f"{region_event_list}.txt", format="ascii")
-        new_times = np.array(times)
-        new_times_array = [x[0] for x in new_times]
-        if (new_times_array[0] - initial_time) >= 0:
-            new_times_array -= initial_time
+        try:
+            times = table.Table.read(filename=f"{region_event_list}.txt", format="ascii")
+        except IndexError:
+            cumulative_counts = np.cumsum(integer_counts)
+            cumulative_counts_plot.plot(zero_shifted_time_kiloseconds, cumulative_counts, color='magenta')
         else: 
-            new_times_array -= new_times_array[0]
-        new_times_array /= 1000.0  # Convert to kiloseconds\
-
-
-        sorted_times = np.sort(new_times_array)
-        sorted_times = np.insert(sorted_times, 0, 0)
-        sorted_times = np.append(sorted_times, observation_duration)
-        y_values = np.arange(0, len(sorted_times) - 1)
-        y_values = np.append(y_values, y_values[-1])
+            new_times = np.array(times)
+            new_times_array = [x[0] for x in new_times]
+            if len(new_times_array) == 0:
+                cumulative_counts = np.cumsum(integer_counts)
+                cumulative_counts_plot.plot(zero_shifted_time_kiloseconds, cumulative_counts, color='magenta')
+            else: 
+                if (new_times_array[0] - initial_time) >= 0:
+                    new_times_array -= initial_time
+                else: 
+                    new_times_array -= new_times_array[0]
+                new_times_array /= 1000.0  # Convert to kiloseconds
+                sorted_times = np.sort(new_times_array)
+                sorted_times = np.insert(sorted_times, 0, 0)
+                sorted_times = np.append(sorted_times, observation_duration)
+                y_values = np.arange(0, len(sorted_times) - 1)
+                y_values = np.append(y_values, y_values[-1])
 
         # jimmy's cumulative counts plot
         cumulative_counts_plot.step(sorted_times, y_values, where='mid', color='magenta')
