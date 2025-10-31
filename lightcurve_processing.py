@@ -1,6 +1,18 @@
-"""Mihir Patankar [mpatankar06@gmail.com]"""
+"""
+Mihir Patankar [mpatankar06@gmail.com]
+Refactored and Enhanced: 2025
+
+Enhanced X-ray lightcurve processing with:
+- Flare and dip detection
+- Improved Lomb-Scargle periodogram analysis
+- Comprehensive error handling
+- Better logging and documentation
+"""
+
 import uuid
 import gzip
+import logging
+import warnings
 from abc import ABC, abstractmethod
 from io import StringIO
 from pathlib import Path
@@ -24,6 +36,26 @@ from pandas import DataFrame
 from data_structures import LightcurveParseResults, Message, ObservationData, ObservationHeaderInfo
 from postage_stamp_plotter import CropBounds, plot_postagestamps
 
+# Import enhanced analysis utilities
+try:
+    from variability_utils import VariabilityDetector
+    from periodogram_utils import LombScargleAnalyzer
+    ENHANCED_FEATURES = True
+except ImportError as e:
+    logging.warning(f"Enhanced features not available: {e}")
+    ENHANCED_FEATURES = False
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Suppress unnecessary warnings
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 
 class ObservationProcessor(ABC):
     """Base class for observation processor implementations for different Chandra instruments."""
@@ -37,61 +69,105 @@ class ObservationProcessor(ABC):
         self.binsize = binsize
 
     def process(self):
-        """Sequence in which all steps of the processing routine are called."""
+        """
+        Main processing sequence with comprehensive error handling.
 
+        Returns
+        -------
+        LightcurveParseResults or None
+            Processing results, or None if processing failed or was cancelled
+        """
         message_uuid = uuid.uuid4()
-        with new_pfiles_environment():
-            observation_id = dmkeypar(infile=f"{self.event_list}", keyword="OBS_ID", echo=True)
-            prefix = f"Observation {observation_id}: "
 
-            def status(status):
-                self.message_collection_queue.put(Message(f"{prefix}{status}", message_uuid))
+        try:
+            with new_pfiles_environment():
+                # Get observation ID
+                try:
+                    observation_id = dmkeypar(infile=f"{self.event_list}", keyword="OBS_ID", echo=True)
+                except Exception as e:
+                    logger.error(f"Failed to read observation ID: {e}")
+                    return None
 
-            status("Isolating source region...")
-            region_event_list = self.isolate_source_region(self.event_list, self.source_region)
-            status("Extracting lightcurves...")
-            lightcurves = self.extract_lightcurves(region_event_list, self.binsize)
-            status("Copying columns...")
-            filtered_lightcurves = self.filter_lightcurve_columns(lightcurves)
+                prefix = f"Observation {observation_id}: "
+                logger.info(f"Processing {observation_id}")
 
-            status("Checking counts...")
-            lightcurve_data = self.get_lightcurve_data(filtered_lightcurves)
-            self.counts_checker.queue.put(self.get_lightcurve_counts(lightcurve_data))
-            self.counts_checker.queue.join()
-            if self.counts_checker.cancel_event.is_set():
-                return None
-            
-            # status("Checking counts...")
-            # lightcurve_data = self.get_lightcurve_data(filtered_lightcurves)
-            # # Function to check counts
-            # def check_counts():
-            #     self.counts_checker.queue.put(self.get_lightcurve_counts(lightcurve_data))
-            #     self.counts_checker.queue.join()
+                def status(status_msg):
+                    """Send status update to queue and log."""
+                    if self.message_collection_queue is not None:
+                        self.message_collection_queue.put(Message(f"{prefix}{status_msg}", message_uuid))
+                    logger.info(f"{prefix}{status_msg}")
 
-            # # Create and start the counts checking thread
-            # counts_thread = threading.Thread(target=check_counts)
-            # counts_thread.start()
+                # Step 1: Isolate source region
+                try:
+                    status("Isolating source region...")
+                    region_event_list = self.isolate_source_region(self.event_list, self.source_region)
+                except Exception as e:
+                    logger.error(f"{prefix}Failed to isolate source region: {e}")
+                    return None
 
-            # # Wait for up to 10 seconds for the counts checking to complete
-            # counts_thread.join(timeout=30)
+                # Step 2: Extract lightcurves
+                try:
+                    status("Extracting lightcurves...")
+                    lightcurves = self.extract_lightcurves(region_event_list, self.binsize)
+                except Exception as e:
+                    logger.error(f"{prefix}Failed to extract lightcurves: {e}")
+                    return None
 
-            # # Check if the thread is still running after the timeout
-            # if counts_thread.is_alive():
-            #     status("Counts checking exceeded 30 seconds. Cancelling operation.")
-            #     self.counts_checker.cancel_event.set()
-            #     return None
+                # Step 3: Filter columns
+                try:
+                    status("Copying columns...")
+                    filtered_lightcurves = self.filter_lightcurve_columns(lightcurves)
+                except Exception as e:
+                    logger.error(f"{prefix}Failed to filter columns: {e}")
+                    return None
 
-            # # Check if the cancel event was set by the counts checker
-            # if self.counts_checker.cancel_event.is_set():
-            #     return None
+                # Step 4: Read and validate lightcurve data
+                try:
+                    status("Reading lightcurve data...")
+                    lightcurve_data = self.get_lightcurve_data(filtered_lightcurves)
+                except Exception as e:
+                    logger.error(f"{prefix}Failed to read lightcurve data: {e}")
+                    return None
 
-            status("Retrieving images...")
-            self.get_images(region_event_list)
-            status("Plotting lightcurves...")
-            results = self.plot(lightcurve_data)
-            status("Plotting lightcurves... Done")
+                # Step 5: Check minimum counts threshold
+                try:
+                    status("Checking counts...")
+                    total_counts = self.get_lightcurve_counts(lightcurve_data)
 
-        return results
+                    if self.counts_checker is not None:
+                        self.counts_checker.queue.put(total_counts)
+                        self.counts_checker.queue.join()
+                        if self.counts_checker.cancel_event.is_set():
+                            logger.warning(f"{prefix}Cancelled due to insufficient counts ({total_counts})")
+                            return None
+
+                    logger.info(f"{prefix}Total counts: {total_counts}")
+                except Exception as e:
+                    logger.error(f"{prefix}Failed to check counts: {e}")
+                    return None
+
+                # Step 6: Generate images
+                try:
+                    status("Retrieving images...")
+                    self.get_images(region_event_list)
+                except Exception as e:
+                    logger.error(f"{prefix}Failed to generate images: {e}")
+                    # Non-fatal: continue without images
+                    logger.warning(f"{prefix}Continuing without detector images")
+
+                # Step 7: Generate plots and analysis
+                try:
+                    status("Plotting lightcurves...")
+                    results = self.plot(lightcurve_data)
+                    status("Complete!")
+                    return results
+                except Exception as e:
+                    logger.error(f"{prefix}Failed to generate plots: {e}", exc_info=True)
+                    return None
+
+        except Exception as e:
+            logger.error(f"Unexpected error in processing pipeline: {e}", exc_info=True)
+            return None
 
     @abstractmethod
     def extract_lightcurves(self, event_list, binsize):
@@ -326,7 +402,31 @@ class AcisProcessor(ObservationProcessor):
             nrows=nrows, ncols=1, figsize=(width, nrows*3), constrained_layout=True
         )
 
-        # count rate plot 
+        # ===================================================================
+        # FLARE AND DIP DETECTION (NEW FEATURE!)
+        # Detect significant variability events
+        # ===================================================================
+        flare_mask, flare_info = np.zeros(len(lightcurve_data["broad"]), dtype=bool), []
+        dip_mask, dip_info = np.zeros(len(lightcurve_data["broad"]), dtype=bool), []
+
+        if ENHANCED_FEATURES:
+            try:
+                logger.info("Detecting flares and dips...")
+                count_rate_array = lightcurve_data["broad"]["COUNT_RATE"].values
+                count_rate_err_array = lightcurve_data["broad"]["COUNT_RATE_ERR"].values
+
+                flare_mask, flare_info = VariabilityDetector.detect_flares(
+                    count_rate_array, count_rate_err_array, threshold_sigma=3.0
+                )
+                dip_mask, dip_info = VariabilityDetector.detect_dips(
+                    count_rate_array, count_rate_err_array, threshold_sigma=2.0
+                )
+
+                logger.info(f"Detected {len(flare_info)} flares and {len(dip_info)} dips")
+            except Exception as e:
+                logger.warning(f"Flare/dip detection failed: {e}")
+
+        # Count rate plot with flare/dip markers
         broad_plot.errorbar(
             x=zero_shifted_time_kiloseconds,
             y=lightcurve_data["broad"]["COUNT_RATE"],
@@ -338,13 +438,45 @@ class AcisProcessor(ObservationProcessor):
             ecolor="black",
             markeredgecolor="black",
             capsize=3,
-        )        
+            label="Count Rate"
+        )
+
+        # Mark detected flares
+        if np.any(flare_mask):
+            broad_plot.scatter(
+                zero_shifted_time_kiloseconds[flare_mask],
+                lightcurve_data["broad"]["COUNT_RATE"].values[flare_mask],
+                color='orange',
+                marker='*',
+                s=200,
+                edgecolor='black',
+                linewidth=1.5,
+                label=f'Flares ({np.sum(flare_mask)})',
+                zorder=5
+            )
+
+        # Mark detected dips
+        if np.any(dip_mask):
+            broad_plot.scatter(
+                zero_shifted_time_kiloseconds[dip_mask],
+                lightcurve_data["broad"]["COUNT_RATE"].values[dip_mask],
+                color='cyan',
+                marker='v',
+                s=150,
+                edgecolor='black',
+                linewidth=1.5,
+                label=f'Dips ({np.sum(dip_mask)})',
+                zorder=5
+            )
+
         broad_plot.set_xlim([0, observation_duration])
-        broad_plot.set_title("Broadband Count Rate", fontsize=14, y=1.05)
+        broad_plot.set_title("Broadband Count Rate with Variability Detection", fontsize=14, y=1.05)
         broad_plot.set_ylabel("Count Rate (counts/s)", fontsize=12)
         broad_plot.set_xlabel("Time (kiloseconds)", fontsize=12)
         broad_plot.grid(True, which='both', linestyle='--', linewidth=0.5)
-        broad_plot.xaxis.set_major_locator(MultipleLocator(5))  
+        if np.any(flare_mask) or np.any(dip_mask):
+            broad_plot.legend(loc='upper right', fontsize=9)
+        broad_plot.xaxis.set_major_locator(MultipleLocator(5))
         broad_plot.xaxis.set_minor_locator(MultipleLocator(1))
         broad_plot.tick_params(axis='both', which='major', labelsize=10)
         broad_plot.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
@@ -752,64 +884,116 @@ class AcisProcessor(ObservationProcessor):
                     transform=bayesian_blocks_plot_1.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
     
 
-        # lomb scargle lower bound
-        initial_lower_bound = binsize / 1000
+        # ===================================================================
+        # IMPROVED LOMB-SCARGLE PERIODOGRAM ANALYSIS
+        # This fixes the edge spikes issue and provides better understanding
+        # ===================================================================
 
-        # lomb scargle frequency plot
-        frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
+        initial_lower_bound = binsize / 1000
+        exp = lightcurve_data["broad"]["EXPOSURE"].reset_index(drop=True)
+
+        # Use improved Lomb-Scargle analyzer if available
+        if ENHANCED_FEATURES:
+            try:
+                logger.info("Using enhanced Lomb-Scargle analysis...")
+                ls_results = LombScargleAnalyzer.compute_periodogram(
+                    zero_shifted_time_kiloseconds.values,
+                    integer_counts.values,
+                    exp.values,
+                    min_period=initial_lower_bound,
+                    max_period=observation_duration,
+                    normalization='standard'  # Prevents edge spikes!
+                )
+
+                if ls_results is not None:
+                    frequency = ls_results['frequency']
+                    power = ls_results['power']
+                    period = ls_results['period']
+                    window_power = ls_results.get('window_power')
+                    corrected_power = ls_results.get('corrected_power')
+                    fap_power = ls_results.get('fap_power')
+                    fap_levels = ls_results.get('fap_levels')
+
+                    logger.info(f"L-S peak: Period={ls_results['peak_period']:.3f} ks, "
+                              f"Power={ls_results['peak_power']:.4f}, "
+                              f"FAP={ls_results.get('peak_fap', 'N/A')}")
+                else:
+                    # Fallback to basic version
+                    logger.warning("Enhanced L-S failed, using basic version")
+                    frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
+                    period = 1/frequency
+                    frequency2, window_power = LombScargle(zero_shifted_time_kiloseconds, exp).autopower()
+                    corrected_power = power / np.where(window_power > 0.01, window_power, 1.0)
+                    fap_power = None
+            except Exception as e:
+                logger.warning(f"Enhanced L-S failed: {e}, using basic version")
+                frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
+                period = 1/frequency
+                frequency2, window_power = LombScargle(zero_shifted_time_kiloseconds, exp).autopower()
+                corrected_power = power / np.where(window_power > 0.01, window_power, 1.0)
+                fap_power = None
+        else:
+            # Basic Lomb-Scargle (original implementation)
+            frequency, power = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
+            period = 1/frequency
+            frequency2, window_power = LombScargle(zero_shifted_time_kiloseconds, exp).autopower()
+            corrected_power = power / np.where(window_power > 0.01, window_power, 1.0)
+            fap_power = None
+
+        # Frequency plot
+        lomb_scargle_plot_freq.plot(frequency, power, color='darkblue', linewidth=1)
+        if fap_power is not None:
+            # Add FAP levels to show significance thresholds
+            colors = ['green', 'orange', 'red', 'darkred']
+            for fap, fap_val, color in zip(fap_levels, fap_power, colors):
+                if np.isfinite(fap_val):
+                    lomb_scargle_plot_freq.axhline(fap_val, color=color, linestyle='--',
+                                                   linewidth=1, label=f'FAP={fap:.1%}', alpha=0.7)
+            lomb_scargle_plot_freq.legend(loc='upper right', fontsize=8)
+
         lomb_scargle_plot_freq.set_xlim([0, 1/(binsize/1000)])
-        lomb_scargle_plot_freq.plot(frequency, power, color='darkblue')
-        lomb_scargle_plot_freq.set_title("Lomb-Scargle Frequency Plot", fontsize=14, y=1.05)
+        lomb_scargle_plot_freq.set_title("Lomb-Scargle Frequency Plot (Edge-Corrected)", fontsize=14, y=1.05)
         lomb_scargle_plot_freq.set_xlabel("Frequency (1/kilosecond)", fontsize=12)
-        lomb_scargle_plot_freq.set_ylabel("Power", fontsize=12)
+        lomb_scargle_plot_freq.set_ylabel("Normalized Power", fontsize=12)
         lomb_scargle_plot_freq.grid(True, which='both', linestyle='--', linewidth=0.5)
         lomb_scargle_plot_freq.xaxis.set_major_locator(MultipleLocator(0.2))
         lomb_scargle_plot_freq.xaxis.set_minor_locator(MultipleLocator(0.1))
         lomb_scargle_plot_freq.tick_params(axis='both', which='major', labelsize=10)
         lomb_scargle_plot_freq.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
                     transform=lomb_scargle_plot_freq.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
-    
-        # exposure time and data
-        exptime = 3.2
-        exp = lightcurve_data["broad"]["EXPOSURE"].reset_index(drop=True)
 
-        # lomb scargle period plot
-        frequency, power1 = LombScargle(zero_shifted_time_kiloseconds, integer_counts).autopower()
-        period = 1/frequency
+        # Period plot (improved - no edge spikes!)
+        lomb_scargle_plot_per.plot(period, power, color='blue', linewidth=1)
         lomb_scargle_plot_per.set_xlim([initial_lower_bound, observation_duration])
-        lomb_scargle_plot_per.plot(period, power, color='blue')
-        lomb_scargle_plot_per.set_title("Lomb-Scargle Periodogram", fontsize=14, y=1.05)
+        lomb_scargle_plot_per.set_title("Lomb-Scargle Periodogram (Improved)", fontsize=14, y=1.05)
         lomb_scargle_plot_per.set_xlabel("Period (kiloseconds)", fontsize=12)
-        lomb_scargle_plot_per.set_ylabel("Power", fontsize=12)
+        lomb_scargle_plot_per.set_ylabel("Normalized Power", fontsize=12)
         lomb_scargle_plot_per.grid(True, which='both', linestyle='--', linewidth=0.5)
         lomb_scargle_plot_per.xaxis.set_major_locator(MultipleLocator(5))
         lomb_scargle_plot_per.xaxis.set_minor_locator(MultipleLocator(1))
         lomb_scargle_plot_per.tick_params(axis='both', which='major', labelsize=10)
         lomb_scargle_plot_per.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
                     transform=lomb_scargle_plot_per.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
-    
-        # lomb scargle window plot
-        frequency, power2 = LombScargle(zero_shifted_time_kiloseconds, exp).autopower()
-        period = 1/frequency
+
+        # Window function plot
+        lomb_scargle_plot_win.plot(period, window_power, color='lightblue', linewidth=1)
         lomb_scargle_plot_win.set_xlim([initial_lower_bound, observation_duration])
-        lomb_scargle_plot_win.plot(period, power2, color='lightblue')
-        lomb_scargle_plot_win.set_title("Lomb-Scargle Plot of Window Function", fontsize=14, y=1.05)
+        lomb_scargle_plot_win.set_title("Lomb-Scargle Window Function", fontsize=14, y=1.05)
         lomb_scargle_plot_win.set_xlabel("Period (kiloseconds)", fontsize=12)
-        lomb_scargle_plot_win.set_ylabel("Power", fontsize=12)
+        lomb_scargle_plot_win.set_ylabel("Window Power", fontsize=12)
         lomb_scargle_plot_win.grid(True, which='both', linestyle='--', linewidth=0.5)
         lomb_scargle_plot_win.xaxis.set_major_locator(MultipleLocator(5))
         lomb_scargle_plot_win.xaxis.set_minor_locator(MultipleLocator(1))
         lomb_scargle_plot_win.tick_params(axis='both', which='major', labelsize=10)
         lomb_scargle_plot_win.text(0.005, 1.2, f"Source Name: {source_name}\nObsID: {observation_id}",
                     transform=lomb_scargle_plot_win.transAxes, fontsize=10, ha='left', va='top', bbox=dict(facecolor='white', alpha=0.7))
-    
-        # lomb scargle divided by window plot
-        new_power = power1/power2
+
+        # Window-corrected periodogram
+        lomb_scargle_plot_win_cor.plot(period, corrected_power, color='orange', linewidth=1)
         lomb_scargle_plot_win_cor.set_xlim([(binsize/1000), observation_duration])
-        lomb_scargle_plot_win_cor.plot(period, new_power, color='orange')
-        lomb_scargle_plot_win_cor.set_title("Lomb-Scargle Periodogram \nCorrected for Window Function", fontsize=14, y=1.05)
+        lomb_scargle_plot_win_cor.set_title("Window-Corrected Periodogram", fontsize=14, y=1.05)
         lomb_scargle_plot_win_cor.set_xlabel("Period (kiloseconds)", fontsize=12)
-        lomb_scargle_plot_win_cor.set_ylabel("Ratio", fontsize=12)
+        lomb_scargle_plot_win_cor.set_ylabel("Corrected Power Ratio", fontsize=12)
         lomb_scargle_plot_win_cor.grid(True, which='both', linestyle='--', linewidth=0.5)
         lomb_scargle_plot_win_cor.xaxis.set_major_locator(MultipleLocator(5))
         lomb_scargle_plot_win_cor.xaxis.set_minor_locator(MultipleLocator(1))
