@@ -1,0 +1,68 @@
+# Web Application Requirements
+# X-ray Lightcurve Analysis Platform - Web Version
+
+# Core Web Framework
+Flask==3.0.3
+Flask-CORS==4.0.0
+Werkzeug==3.0.3
+Jinja2==3.1.4
+click==8.1.7
+
+# WSGI Server for Production
+gunicorn==21.2.0
+
+# Database
+# Note: SQLite is included with Python, but add this for better support
+# For production, consider PostgreSQL:
+# psycopg2-binary==2.9.9
+
+# Task Queue (Optional - for background processing)
+celery[redis]==5.3.4
+redis==5.0.1
+
+# Scientific Computing (from main requirements)
+numpy==1.26.2
+scipy==1.13.1
+pandas==2.2.2
+astropy==6.1.0
+matplotlib==3.9.0
+
+# Chandra/CIAO dependencies
+# NOTE: These require CIAO 4.15 to be installed separately
+# The following are just placeholders - actual imports from CIAO
+# ciao_contrib
+# pycrates
+# sherpa
+
+# Other astronomical libraries
+pyvo==1.5.2
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2024.1
+tqdm==4.66.4
+psutil==5.9.6
+PyYAML==6.0.1
+requests==2.31.0
+beautifulsoup4==4.12.3
+
+# Development/Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+black==23.12.1
+flake8==7.0.0
+
+# Documentation
+# Sphinx==7.2.6  # If you want to generate API docs
+
+# Security
+cryptography==42.0.5
+
+# Monitoring (optional)
+# sentry-sdk[flask]==1.40.0  # Error tracking
+# flask-limiter==3.5.0  # Rate limiting
+
+# Note on CIAO:
+# This application requires CIAO 4.15 to be installed and initialized
+# Follow instructions at: https://cxc.cfa.harvard.edu/ciao/download/
+# Before running, execute: source /path/to/ciao-4.15/bin/ciao.bash

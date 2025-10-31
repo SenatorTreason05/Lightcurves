@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block title %}Browse Sources - X-ray Lightcurve Analysis{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Search Chandra Source Catalog</h2>
+    <form id="searchForm" onsubmit="return searchCSC(event)">
+        <div class="grid">
+            <div class="form-group">
+                <label for="objectName">Object Name</label>
+                <input type="text" id="objectName" name="object" placeholder="e.g., M31, Crab, Cas A" required>
+            </div>
+            <div class="form-group">
+                <label for="radius">Search Radius (arcmin)</label>
+                <input type="number" id="radius" name="radius" value="1.0" step="0.1" min="0.1" max="60">
+            </div>
+            <div class="form-group">
+                <label for="significance">Minimum Significance (σ)</label>
+                <input type="number" id="significance" name="significance" value="3.0" step="0.5" min="1.0">
+            </div>
+        </div>
+        <button type="submit" id="searchBtn">Search CSC</button>
+    </form>
+    <div id="searchResult" class="mt-2"></div>
+</div>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h2>Available Sources</h2>
+        <div>
+            <label for="sortBy" style="display: inline; margin-right: 0.5rem;">Sort by:</label>
+            <select id="sortBy" onchange="loadSources()" style="width: auto; display: inline-block;">
+                <option value="name">Name</option>
+                <option value="n_observations">Number of Observations</option>
+                <option value="significance">Significance</option>
+                <option value="last_updated">Last Updated</option>
+            </select>
+            <select id="sortOrder" onchange="loadSources()" style="width: auto; display: inline-block; margin-left: 0.5rem;">
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="sourcesLoading" class="text-center">
+        <div class="loading"></div> Loading sources...
+    </div>
+
+    <div id="sourcesContent" class="hidden">
+        <table id="sourcesTable">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>RA (deg)</th>
+                    <th>Dec (deg)</th>
+                    <th>Significance (σ)</th>
+                    <th>Observations</th>
+                    <th>Last Updated</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="sourcesBody">
+                <!-- Filled by JavaScript -->
+            </tbody>
+        </table>
+
+        <div id="pagination" class="mt-2 text-center">
+            <!-- Pagination controls -->
+        </div>
+    </div>
+
+    <div id="noSources" class="hidden text-center text-muted">
+        <p>No sources found. Use the search form above to add sources from the Chandra Source Catalog.</p>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentPage = 0;
+    const itemsPerPage = 20;
+
+    // Load sources on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        loadSources();
+    });
+
+    async function loadSources() {
+        const sortBy = document.getElementById('sortBy').value;
+        const sortOrder = document.getElementById('sortOrder').value;
+
+        const sourcesLoading = document.getElementById('sourcesLoading');
+        const sourcesContent = document.getElementById('sourcesContent');
+        const noSources = document.getElementById('noSources');
+        const sourcesBody = document.getElementById('sourcesBody');
+
+        // Show loading
+        sourcesLoading.classList.remove('hidden');
+        sourcesContent.classList.add('hidden');
+        noSources.classList.add('hidden');
+
+        try {
+            const data = await fetchAPI(`/sources?limit=${itemsPerPage}&offset=${currentPage * itemsPerPage}&sort=${sortBy}&order=${sortOrder}`);
+
+            if (data.sources.length === 0 && currentPage === 0) {
+                noSources.classList.remove('hidden');
+                sourcesLoading.classList.add('hidden');
+                return;
+            }
+
+            // Populate table
+            sourcesBody.innerHTML = data.sources.map(source => `
+                <tr>
+                    <td><strong>${source.name}</strong></td>
+                    <td>${formatNumber(source.ra, 4)}</td>
+                    <td>${formatNumber(source.dec, 4)}</td>
+                    <td>${formatNumber(source.significance, 1)}</td>
+                    <td>${source.n_observations}</td>
+                    <td>${formatDate(source.last_updated)}</td>
+                    <td><a href="/source/${source.name}" class="btn btn-secondary" style="padding: 0.5rem 1rem;">View</a></td>
+                </tr>
+            `).join('');
+
+            // Show content
+            sourcesLoading.classList.add('hidden');
+            sourcesContent.classList.remove('hidden');
+
+            // Update pagination
+            updatePagination(data.total);
+
+        } catch (error) {
+            console.error('Error loading sources:', error);
+            sourcesLoading.innerHTML = `<div class="alert alert-error">Error loading sources: ${error.message}</div>`;
+        }
+    }
+
+    function updatePagination(total) {
+        const pagination = document.getElementById('pagination');
+        const totalPages = Math.ceil(total / itemsPerPage);
+
+        if (totalPages <= 1) {
+            pagination.innerHTML = '';
+            return;
+        }
+
+        let html = '<div>';
+
+        // Previous button
+        if (currentPage > 0) {
+            html += `<button onclick="changePage(${currentPage - 1})">← Previous</button> `;
+        }
+
+        // Page info
+        html += `<span style="margin: 0 1rem;">Page ${currentPage + 1} of ${totalPages}</span>`;
+
+        // Next button
+        if (currentPage < totalPages - 1) {
+            html += ` <button onclick="changePage(${currentPage + 1})">Next →</button>`;
+        }
+
+        html += '</div>';
+        pagination.innerHTML = html;
+    }
+
+    function changePage(page) {
+        currentPage = page;
+        loadSources();
+        window.scrollTo(0, 0);
+    }
+
+    async function searchCSC(event) {
+        event.preventDefault();
+
+        const form = event.target;
+        const formData = new FormData(form);
+        const params = new URLSearchParams(formData);
+
+        const searchBtn = document.getElementById('searchBtn');
+        const searchResult = document.getElementById('searchResult');
+
+        // Disable button and show loading
+        searchBtn.disabled = true;
+        searchBtn.innerHTML = '<div class="loading"></div> Searching...';
+        searchResult.innerHTML = '';
+
+        try {
+            const data = await fetchAPI(`/search?${params.toString()}`);
+
+            // Show result
+            searchResult.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>Search complete!</strong><br>
+                    Found ${data.sources_found} sources for "${data.object}"<br>
+                    ${data.sources_found > 0 ? 'Refresh the page to see new sources.' : ''}
+                </div>
+            `;
+
+            // Reload sources if any were found
+            if (data.sources_found > 0) {
+                setTimeout(() => {
+                    loadSources();
+                }, 2000);
+            }
+
+        } catch (error) {
+            console.error('Search error:', error);
+            searchResult.innerHTML = `<div class="alert alert-error">Search failed: ${error.message}</div>`;
+        } finally {
+            // Re-enable button
+            searchBtn.disabled = false;
+            searchBtn.innerHTML = 'Search CSC';
+        }
+
+        return false;
+    }
+</script>
+{% endblock %}

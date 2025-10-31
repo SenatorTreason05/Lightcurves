@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block title %}{{ source_name }} - X-ray Lightcurve Analysis{% endblock %}
+
+{% block content %}
+<div id="loading" class="card text-center">
+    <div class="loading"></div> Loading source data...
+</div>
+
+<div id="content" class="hidden">
+    <!-- Source Header -->
+    <div class="card">
+        <h2 id="sourceTitle">{{ source_name }}</h2>
+        <div class="stat-grid" id="sourceStats">
+            <!-- Filled by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Observations List -->
+    <div class="card">
+        <h2>Observations (<span id="obsCount">0</span>)</h2>
+        <table id="observationsTable">
+            <thead>
+                <tr>
+                    <th>ObsID</th>
+                    <th>Instrument</th>
+                    <th>Start Time</th>
+                    <th>Exposure (ks)</th>
+                    <th>Total Counts</th>
+                    <th>Avg Rate (cts/s)</th>
+                    <th>Processed</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="observationsBody">
+                <!-- Filled by JavaScript -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Quick Analysis -->
+    <div class="card">
+        <h2>Quick Analysis</h2>
+        <p>Process all unprocessed observations for this source:</p>
+        <button onclick="processAllObservations()" id="processAllBtn">Process All Observations</button>
+        <div id="processResult" class="mt-2"></div>
+    </div>
+</div>
+
+<div id="error" class="card hidden">
+    <div class="alert alert-error">
+        <strong>Error:</strong> <span id="errorMessage"></span>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const sourceName = "{{ source_name }}";
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadSource();
+    });
+
+    async function loadSource() {
+        try {
+            const data = await fetchAPI(`/sources/${sourceName}`);
+
+            // Hide loading, show content
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('content').classList.remove('hidden');
+
+            // Populate source info
+            document.getElementById('sourceStats').innerHTML = `
+                <div class="stat-box">
+                    <div class="stat-label">RA</div>
+                    <div class="stat-value">${formatNumber(data.ra, 4)}°</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Dec</div>
+                    <div class="stat-value">${formatNumber(data.dec, 4)}°</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Significance</div>
+                    <div class="stat-value">${formatNumber(data.significance, 1)}σ</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Observations</div>
+                    <div class="stat-value">${data.n_observations}</div>
+                </div>
+            `;
+
+            // Populate observations table
+            document.getElementById('obsCount').textContent = data.observations.length;
+
+            if (data.observations.length === 0) {
+                document.getElementById('observationsBody').innerHTML = `
+                    <tr><td colspan="8" class="text-center text-muted">No observations found</td></tr>
+                `;
+                return;
+            }
+
+            document.getElementById('observationsBody').innerHTML = data.observations.map(obs => `
+                <tr>
+                    <td><strong>${obs.obsid}</strong></td>
+                    <td>${obs.instrument}</td>
+                    <td>${formatDate(obs.start_time)}</td>
+                    <td>${formatNumber(obs.exposure_time / 1000, 1)}</td>
+                    <td>${obs.total_counts || 'N/A'}</td>
+                    <td>${formatNumber(obs.avg_count_rate)}</td>
+                    <td>${obs.processed ? '✓ Yes' : '✗ No'}</td>
+                    <td><a href="/observation/${obs.obsid}" class="btn btn-secondary" style="padding: 0.5rem 1rem;">View</a></td>
+                </tr>
+            `).join('');
+
+        } catch (error) {
+            console.error('Error loading source:', error);
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error').classList.remove('hidden');
+            document.getElementById('errorMessage').textContent = error.message;
+        }
+    }
+
+    async function processAllObservations() {
+        const processAllBtn = document.getElementById('processAllBtn');
+        const processResult = document.getElementById('processResult');
+
+        processAllBtn.disabled = true;
+        processAllBtn.innerHTML = '<div class="loading"></div> Submitting jobs...';
+
+        try {
+            // Get source data to find unprocessed observations
+            const data = await fetchAPI(`/sources/${sourceName}`);
+            const unprocessed = data.observations.filter(obs => !obs.processed);
+
+            if (unprocessed.length === 0) {
+                processResult.innerHTML = `
+                    <div class="alert alert-info">All observations are already processed!</div>
+                `;
+                processAllBtn.disabled = false;
+                processAllBtn.innerHTML = 'Process All Observations';
+                return;
+            }
+
+            // Submit analysis jobs for each unprocessed observation
+            const jobs = [];
+            for (const obs of unprocessed) {
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        obsid: obs.obsid,
+                        binsize: 500  // Default binsize
+                    })
+                });
+                const job = await response.json();
+                jobs.push(job);
+            }
+
+            processResult.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>Submitted ${jobs.length} analysis jobs!</strong><br>
+                    Jobs are being processed. Refresh the page later to see results.
+                </div>
+            `;
+
+        } catch (error) {
+            console.error('Error processing observations:', error);
+            processResult.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+        } finally {
+            processAllBtn.disabled = false;
+            processAllBtn.innerHTML = 'Process All Observations';
+        }
+    }
+</script>
+{% endblock %}

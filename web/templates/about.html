@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block title %}About - X-ray Lightcurve Analysis{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>About This Platform</h2>
+    <p>
+        The X-ray Lightcurve Analysis Platform is a web-based tool for analyzing X-ray observations
+        from the Chandra X-ray Observatory. It provides automated, comprehensive analysis of
+        lightcurves with advanced variability detection and periodogram analysis.
+    </p>
+</div>
+
+<div class="card">
+    <h2>Features</h2>
+    <div class="grid">
+        <div>
+            <h3>🔥 Flare Detection</h3>
+            <p>
+                Automatic detection of statistically significant flares using robust statistics.
+                Flares are identified as count rate increases >3σ above the median.
+            </p>
+        </div>
+        <div>
+            <h3>⚡ Dip Detection</h3>
+            <p>
+                Identifies significant dips in count rate (>2σ below median), useful for
+                detecting eclipses, absorption events, or obscuration.
+            </p>
+        </div>
+        <div>
+            <h3>📊 Improved Lomb-Scargle</h3>
+            <p>
+                Edge-corrected periodogram analysis with False Alarm Probability levels.
+                No more artifacts! Clear significance assessment for periodic signals.
+            </p>
+        </div>
+        <div>
+            <h3>🎨 Multi-Band Analysis</h3>
+            <p>
+                Extracts lightcurves in 5 energy bands (Ultrasoft, Soft, Medium, Hard, Broadband).
+                Computes 4 different hardness ratios for spectral evolution tracking.
+            </p>
+        </div>
+        <div>
+            <h3>📈 Bayesian Blocks</h3>
+            <p>
+                Adaptive binning to identify count rate changes with three different prior
+                probabilities (p0 = 1, 5, 10) for sensitivity tuning.
+            </p>
+        </div>
+        <div>
+            <h3>🌐 Global Access</h3>
+            <p>
+                No local installation required. Access pre-processed data instantly.
+                Submit new analysis jobs with custom parameters.
+            </p>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>How It Works</h2>
+    <ol style="margin-left: 2rem;">
+        <li><strong>Search</strong>: Query the Chandra Source Catalog for sources near your target</li>
+        <li><strong>Browse</strong>: Explore available sources and their observations</li>
+        <li><strong>Analyze</strong>: View comprehensive analysis including plots, flares, dips, and periodograms</li>
+        <li><strong>Export</strong>: Download CSV data and high-quality SVG plots</li>
+        <li><strong>Reprocess</strong>: Submit jobs with different parameters (binsize, etc.)</li>
+    </ol>
+</div>
+
+<div class="card">
+    <h2>The Analysis Pipeline</h2>
+    <p>Each observation is processed through a comprehensive pipeline that generates:</p>
+    <ul style="margin-left: 2rem;">
+        <li>14-panel comprehensive plot including:
+            <ul style="margin-left: 1rem;">
+                <li>Broadband count rate with flare/dip markers</li>
+                <li>Bayesian Blocks segmentation (3 variants)</li>
+                <li>Separated energy band count rates</li>
+                <li>Hardness ratio evolution</li>
+                <li>Cumulative counts</li>
+                <li>Lomb-Scargle periodograms (4 variants)</li>
+                <li>Gregory-Loredo variability</li>
+                <li>Fractional area tracking</li>
+            </ul>
+        </li>
+        <li>CSV data file with all photometry</li>
+        <li>Postage stamp images (sky and detector coordinates)</li>
+        <li>Variability metrics and statistics</li>
+    </ul>
+</div>
+
+<div class="card">
+    <h2>Understanding the Results</h2>
+
+    <h3>Flares and Dips</h3>
+    <p>
+        <strong>Flares</strong> (marked with orange stars ★) are significant increases in count rate.
+        They're detected using the Median Absolute Deviation (MAD) method, which is robust to outliers.
+    </p>
+    <p>
+        <strong>Dips</strong> (marked with cyan triangles ▼) are significant decreases in count rate.
+        These can indicate eclipses, absorption events, or the source passing behind obscuring material.
+    </p>
+
+    <h3>Lomb-Scargle Periodogram</h3>
+    <p>
+        The periodogram searches for periodic signals in the data. The colored dashed lines show
+        <strong>False Alarm Probability (FAP)</strong> levels:
+    </p>
+    <ul style="margin-left: 2rem;">
+        <li>Green (10%): Possibly significant</li>
+        <li>Orange (5%): Likely significant</li>
+        <li>Red (1%): Very likely significant</li>
+        <li>Dark red (0.1%): Extremely confident</li>
+    </ul>
+    <p>
+        If a peak is above the red line (1% FAP), you can be very confident it represents a real
+        periodic signal!
+    </p>
+
+    <h3>Hardness Ratios</h3>
+    <p>
+        Hardness ratios track spectral evolution by comparing count rates in different energy bands:
+    </p>
+    <ul style="margin-left: 2rem;">
+        <li><strong>HR_HS</strong>: (S-H)/(S+H) - Hard vs Soft</li>
+        <li><strong>HR_MS</strong>: (S-M)/(S+M) - Medium vs Soft</li>
+        <li><strong>HR_SMH</strong>: (S-(M+H))/(S+M+H) - Soft vs Higher energies</li>
+        <li><strong>HR_MHSU</strong>: ((S+U)-(M+H))/(S+U+M+H) - Full band comparison</li>
+    </ul>
+    <p>
+        Changes in hardness ratios indicate spectral evolution, which can be correlated with
+        flares, dips, or other variability features.
+    </p>
+</div>
+
+<div class="card">
+    <h2>API Access</h2>
+    <p>
+        Programmatic access is available through our REST API. Documentation:
+    </p>
+    <ul style="margin-left: 2rem;">
+        <li><code>GET /api/sources</code> - List all sources</li>
+        <li><code>GET /api/sources/{name}</code> - Get source details</li>
+        <li><code>GET /api/observations/{obsid}</code> - Get observation details</li>
+        <li><code>GET /api/observations/{obsid}/data</code> - Download CSV data</li>
+        <li><code>GET /api/observations/{obsid}/plot</code> - Download plot</li>
+        <li><code>POST /api/analyze</code> - Submit analysis job</li>
+    </ul>
+    <p>
+        All responses are in JSON format (except data/plot downloads).
+    </p>
+</div>
+
+<div class="card">
+    <h2>Citation</h2>
+    <p>
+        If you use this platform in your research, please cite:
+    </p>
+    <pre style="background: #f8f9fa; padding: 1rem; border-radius: 4px; overflow-x: auto;">
+@software{lightcurves2025,
+  title = {X-ray Lightcurve Analysis Platform},
+  author = {Mihir Patankar},
+  year = {2025},
+  note = {Web-based platform for automated X-ray lightcurve analysis},
+  url = {https://github.com/SenatorTreason05/Lightcurves}
+}</pre>
+</div>
+
+<div class="card">
+    <h2>Contact & Support</h2>
+    <p>
+        <strong>Author</strong>: Mihir Patankar<br>
+        <strong>Email</strong>: mpatankar06@gmail.com<br>
+        <strong>GitHub</strong>: <a href="https://github.com/SenatorTreason05/Lightcurves">SenatorTreason05/Lightcurves</a>
+    </p>
+    <p>
+        For issues, feature requests, or questions, please use the GitHub issue tracker.
+    </p>
+</div>
+
+<div class="card">
+    <h2>Acknowledgments</h2>
+    <p>
+        This platform uses data from the Chandra X-ray Observatory, a NASA mission operated by
+        the Smithsonian Astrophysical Observatory. We acknowledge the use of:
+    </p>
+    <ul style="margin-left: 2rem;">
+        <li>Chandra Source Catalog (CSC)</li>
+        <li>CIAO (Chandra Interactive Analysis of Observations)</li>
+        <li>Astropy for astronomical data analysis</li>
+        <li>NumPy, SciPy, Matplotlib for scientific computing</li>
+    </ul>
+</div>
+{% endblock %}

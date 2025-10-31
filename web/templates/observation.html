@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+
+{% block title %}Observation {{ obsid }} - X-ray Lightcurve Analysis{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stat-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin: 1rem 0;
+    }
+
+    .stat-box {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 4px;
+        border-left: 4px solid #3498db;
+    }
+
+    .stat-label {
+        font-size: 0.85rem;
+        color: #6c757d;
+        margin-bottom: 0.25rem;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+
+    .plot-container {
+        background: white;
+        padding: 1rem;
+        border-radius: 4px;
+        margin: 1rem 0;
+        text-align: center;
+    }
+
+    .plot-container img {
+        max-width: 100%;
+        height: auto;
+    }
+
+    .events-list {
+        list-style: none;
+    }
+
+    .event-item {
+        background: #f8f9fa;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
+        border-radius: 4px;
+        border-left: 4px solid #e74c3c;
+    }
+
+    .event-item.dip {
+        border-left-color: #3498db;
+    }
+
+    .tabs {
+        display: flex;
+        border-bottom: 2px solid #ecf0f1;
+        margin-bottom: 1rem;
+    }
+
+    .tab {
+        padding: 1rem 2rem;
+        cursor: pointer;
+        border: none;
+        background: none;
+        font-size: 1rem;
+        color: #7f8c8d;
+        transition: all 0.3s;
+    }
+
+    .tab.active {
+        color: #3498db;
+        border-bottom: 2px solid #3498db;
+        margin-bottom: -2px;
+    }
+
+    .tab:hover {
+        color: #3498db;
+    }
+
+    .tab-content {
+        display: none;
+    }
+
+    .tab-content.active {
+        display: block;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="loading" class="card text-center">
+    <div class="loading"></div> Loading observation data...
+</div>
+
+<div id="content" class="hidden">
+    <!-- Observation Header -->
+    <div class="card">
+        <h2 id="obsTitle">Observation {{ obsid }}</h2>
+        <div class="stat-grid" id="obsStats">
+            <!-- Filled by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Variability Summary -->
+    <div class="card">
+        <h2>Variability Analysis</h2>
+        <div class="grid">
+            <div>
+                <h3>Flares Detected: <span id="flareCount">0</span></h3>
+                <ul id="flaresList" class="events-list">
+                    <!-- Filled by JavaScript -->
+                </ul>
+            </div>
+            <div>
+                <h3>Dips Detected: <span id="dipCount">0</span></h3>
+                <ul id="dipsList" class="events-list">
+                    <!-- Filled by JavaScript -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lomb-Scargle Results -->
+    <div class="card">
+        <h2>Periodogram Analysis</h2>
+        <div class="stat-grid" id="lsStats">
+            <!-- Filled by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Tabs for different views -->
+    <div class="card">
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('plot')">Comprehensive Plot</button>
+            <button class="tab" onclick="switchTab('data')">Data Table</button>
+            <button class="tab" onclick="switchTab('export')">Export</button>
+        </div>
+
+        <!-- Plot Tab -->
+        <div id="tabPlot" class="tab-content active">
+            <div class="form-group">
+                <label for="binsizeSelect">Binsize (seconds):</label>
+                <select id="binsizeSelect" onchange="loadPlot()" style="width: 200px;">
+                    <!-- Filled by JavaScript -->
+                </select>
+            </div>
+            <div id="plotContainer" class="plot-container">
+                <img id="plotImage" src="" alt="Lightcurve plot">
+            </div>
+        </div>
+
+        <!-- Data Tab -->
+        <div id="tabData" class="tab-content">
+            <p class="text-muted">First 20 rows of lightcurve data. Download full CSV for complete dataset.</p>
+            <div id="dataTable" style="overflow-x: auto;">
+                <!-- Filled by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Export Tab -->
+        <div id="tabExport" class="tab-content">
+            <h3>Download Data</h3>
+            <p>Export the lightcurve data and plots for further analysis:</p>
+            <div class="grid">
+                <div>
+                    <h4>Data Files</h4>
+                    <button onclick="downloadCSV()" class="btn">Download CSV Data</button>
+                    <p class="text-muted mt-2">
+                        Complete lightcurve data including all energy bands, exposure times, and areas.
+                    </p>
+                </div>
+                <div>
+                    <h4>Plots</h4>
+                    <button onclick="downloadPlot()" class="btn">Download Plot (SVG)</button>
+                    <p class="text-muted mt-2">
+                        High-resolution vector graphics, perfect for publications.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reprocess Controls -->
+    <div class="card">
+        <h2>Reprocess with Different Parameters</h2>
+        <form id="reprocessForm" onsubmit="return reprocessObservation(event)">
+            <div class="grid">
+                <div class="form-group">
+                    <label for="newBinsize">New Binsize (seconds)</label>
+                    <input type="number" id="newBinsize" name="binsize" value="500" step="50" min="10" required>
+                </div>
+            </div>
+            <button type="submit" id="reprocessBtn">Reprocess Observation</button>
+            <div id="reprocessResult" class="mt-2"></div>
+        </form>
+    </div>
+</div>
+
+<div id="error" class="card hidden">
+    <div class="alert alert-error">
+        <strong>Error:</strong> <span id="errorMessage"></span>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const obsid = "{{ obsid }}";
+    let currentData = null;
+
+    // Load data on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        loadObservation();
+    });
+
+    async function loadObservation() {
+        try {
+            const data = await fetchAPI(`/observations/${obsid}`);
+            currentData = data;
+
+            // Hide loading, show content
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('content').classList.remove('hidden');
+
+            // Populate observation info
+            document.getElementById('obsTitle').innerHTML = `
+                Observation ${obsid} - ${data.instrument}
+            `;
+
+            document.getElementById('obsStats').innerHTML = `
+                <div class="stat-box">
+                    <div class="stat-label">Exposure Time</div>
+                    <div class="stat-value">${formatNumber(data.exposure_time / 1000, 1)} ks</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Total Counts</div>
+                    <div class="stat-value">${data.total_counts || 'N/A'}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Avg Count Rate</div>
+                    <div class="stat-value">${formatNumber(data.avg_count_rate)} cts/s</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Off-Axis</div>
+                    <div class="stat-value">${formatNumber(data.off_axis_offset, 1)}'</div>
+                </div>
+            `;
+
+            // Populate analyses (binsizes)
+            if (data.analyses && data.analyses.length > 0) {
+                const binsizeSelect = document.getElementById('binsizeSelect');
+                binsizeSelect.innerHTML = data.analyses.map(analysis => `
+                    <option value="${analysis.binsize}">${analysis.binsize}s</option>
+                `).join('');
+
+                // Load first plot
+                loadPlot();
+
+                // Populate variability info from latest analysis
+                const latest = data.analyses[0];
+                document.getElementById('flareCount').textContent = latest.n_flares;
+                document.getElementById('dipCount').textContent = latest.n_dips;
+
+                // Populate flares list
+                if (data.flares && data.flares.length > 0) {
+                    document.getElementById('flaresList').innerHTML = data.flares.map(flare => `
+                        <li class="event-item">
+                            <strong>t = ${formatNumber(flare.time_ks, 2)} ks</strong><br>
+                            Rate: ${formatNumber(flare.count_rate, 3)} ± ${formatNumber(flare.count_rate_err, 3)} cts/s<br>
+                            Significance: ${formatNumber(flare.significance, 1)}σ,
+                            Peak factor: ${formatNumber(flare.peak_factor, 2)}x
+                        </li>
+                    `).join('');
+                } else {
+                    document.getElementById('flaresList').innerHTML = '<li class="text-muted">No flares detected</li>';
+                }
+
+                // Populate dips list
+                if (data.dips && data.dips.length > 0) {
+                    document.getElementById('dipsList').innerHTML = data.dips.map(dip => `
+                        <li class="event-item dip">
+                            <strong>t = ${formatNumber(dip.time_ks, 2)} ks</strong><br>
+                            Rate: ${formatNumber(dip.count_rate, 3)} ± ${formatNumber(dip.count_rate_err, 3)} cts/s<br>
+                            Significance: ${formatNumber(dip.significance, 1)}σ,
+                            Depth factor: ${formatNumber(dip.depth_factor, 2)}x
+                        </li>
+                    `).join('');
+                } else {
+                    document.getElementById('dipsList').innerHTML = '<li class="text-muted">No dips detected</li>';
+                }
+
+                // Populate L-S stats
+                document.getElementById('lsStats').innerHTML = `
+                    <div class="stat-box">
+                        <div class="stat-label">Peak Period</div>
+                        <div class="stat-value">${formatNumber(latest.ls_peak_period, 2)} ks</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Peak Frequency</div>
+                        <div class="stat-value">${formatNumber(latest.ls_peak_frequency, 4)} /ks</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Peak Power</div>
+                        <div class="stat-value">${formatNumber(latest.ls_peak_power, 3)}</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">False Alarm Prob</div>
+                        <div class="stat-value">${latest.ls_peak_fap ? latest.ls_peak_fap.toExponential(2) : 'N/A'}</div>
+                    </div>
+                `;
+            } else {
+                document.getElementById('binsizeSelect').innerHTML = '<option>No analyses available</option>';
+            }
+
+        } catch (error) {
+            console.error('Error loading observation:', error);
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error').classList.remove('hidden');
+            document.getElementById('errorMessage').textContent = error.message;
+        }
+    }
+
+    function loadPlot() {
+        const binsize = document.getElementById('binsizeSelect').value;
+        const plotImage = document.getElementById('plotImage');
+
+        plotImage.src = `/api/observations/${obsid}/plot?binsize=${binsize}`;
+        plotImage.alt = `Lightcurve plot for ObsID ${obsid} with binsize ${binsize}s`;
+    }
+
+    function switchTab(tabName) {
+        // Update tab buttons
+        document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+        event.target.classList.add('active');
+
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+        document.getElementById(`tab${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`).classList.add('active');
+
+        // Load data table if switching to data tab
+        if (tabName === 'data' && !document.getElementById('dataTable').innerHTML) {
+            loadDataTable();
+        }
+    }
+
+    async function loadDataTable() {
+        const dataTable = document.getElementById('dataTable');
+        dataTable.innerHTML = '<div class="loading"></div> Loading data...';
+
+        try {
+            const response = await fetch(`/api/observations/${obsid}/data`);
+            const csvText = await response.text();
+
+            // Parse CSV (simple parsing)
+            const lines = csvText.trim().split('\n');
+            const headers = lines[0].split(',');
+            const rows = lines.slice(1, 21); // First 20 rows
+
+            let html = '<table><thead><tr>';
+            headers.forEach(header => {
+                html += `<th>${header}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+
+            rows.forEach(row => {
+                html += '<tr>';
+                row.split(',').forEach(cell => {
+                    html += `<td>${cell}</td>`;
+                });
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            html += '<p class="text-muted mt-2">Showing first 20 rows. Download CSV for complete data.</p>';
+
+            dataTable.innerHTML = html;
+
+        } catch (error) {
+            console.error('Error loading data table:', error);
+            dataTable.innerHTML = `<div class="alert alert-error">Error loading data: ${error.message}</div>`;
+        }
+    }
+
+    function downloadCSV() {
+        window.location.href = `/api/observations/${obsid}/data`;
+    }
+
+    function downloadPlot() {
+        const binsize = document.getElementById('binsizeSelect').value;
+        window.location.href = `/api/observations/${obsid}/plot?binsize=${binsize}`;
+    }
+
+    async function reprocessObservation(event) {
+        event.preventDefault();
+
+        const form = event.target;
+        const binsize = document.getElementById('newBinsize').value;
+        const reprocessBtn = document.getElementById('reprocessBtn');
+        const reprocessResult = document.getElementById('reprocessResult');
+
+        // Disable button
+        reprocessBtn.disabled = true;
+        reprocessBtn.innerHTML = '<div class="loading"></div> Submitting...';
+        reprocessResult.innerHTML = '';
+
+        try {
+            const response = await fetch('/api/analyze', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    obsid: obsid,
+                    binsize: parseFloat(binsize)
+                })
+            });
+
+            const data = await response.json();
+
+            reprocessResult.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>Analysis job submitted!</strong><br>
+                    Job ID: ${data.job_id}<br>
+                    Status: ${data.status}<br>
+                    <a href="/api/jobs/${data.job_id}">Check job status</a>
+                </div>
+            `;
+
+        } catch (error) {
+            console.error('Reprocess error:', error);
+            reprocessResult.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+        } finally {
+            reprocessBtn.disabled = false;
+            reprocessBtn.innerHTML = 'Reprocess Observation';
+        }
+
+        return false;
+    }
+</script>
+{% endblock %}
